@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meeting-recorder"
+version = "4.2.0"
+description = "Dual-source (mic + system loopback) synchronized meeting audio recorder for Windows."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy~=1.26",
+    "PyAudioWPatch~=0.2.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff~=0.15.0",
+    "mypy~=1.20",
+    "pytest~=8.3",
+    "pytest-cov~=5.0",
+]
+
+[project.scripts]
+meeting-recorder = "meeting_recorder.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["meeting_recorder"]
+
+# -- Linting & formatting ----------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+]
+
+# -- Static type checking ----------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+files = ["src/meeting_recorder"]
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+# PyAudioWPatch ships no type information.
+module = "pyaudiowpatch.*"
+ignore_missing_imports = true
+
+# -- Testing -----------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Integration tests need real audio hardware (mic + WASAPI loopback); exclude
+# them from the default run so the unit tier stays fast and hardware-free.
+addopts = "-m 'not integration'"
+markers = [
+    "integration: end-to-end tests that require real audio devices (deselect with -m 'not integration')",
+]
