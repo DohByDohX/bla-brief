@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-07-09
+
+### Fixed
+- Interactive mode: picking a system (loopback) device other than the current
+  Windows default output produced an empty system track. The keepalive tone was
+  played on the default output, leaving the chosen loopback endpoint idle so
+  WASAPI delivered no frames. `find_devices()` now routes the keepalive to the
+  output that feeds the chosen loopback (`_find_output_for_loopback`), falling
+  back to the default output when no match exists.
+- Post-recording summary showed the in-progress `.part` temp filename for the
+  mixed file instead of the published name. `create_mixed_file()` accepts an
+  optional `report_path` so the summary reports the final published file.
+
 ## [4.3.0] - 2026-07-09
 
 ### Added

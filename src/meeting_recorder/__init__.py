@@ -4,4 +4,4 @@ Records the microphone and system (loopback) audio simultaneously into
 separate WAV tracks, then produces a normalized mixed file for transcription.
 """
 
-__version__ = "4.3.0"
+__version__ = "4.3.1"
