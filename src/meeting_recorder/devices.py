@@ -67,6 +67,10 @@ def find_devices(
     output_info = _find_output(pa, devices, wasapi_api_idx)
     if loopback_index is not None:
         loopback_info: DeviceInfo | None = _info(pa, loopback_index)
+        # Keepalive must play on the OUTPUT that feeds THIS loopback. If it
+        # plays on a different (default) output, the chosen endpoint stays
+        # idle and WASAPI delivers no frames -> empty system track.
+        output_info = _find_output_for_loopback(devices, loopback_info) or output_info
     else:
         loopback_info = _find_loopback(devices, output_info)
     mic_info = _find_mic(pa, devices, output_info, wasapi_api_idx, mic_index)
@@ -106,6 +110,29 @@ def _find_loopback(devices: list[DeviceInfo], output_info: DeviceInfo | None) ->
     # Fallback: first loopback device.
     for d in devices:
         if d.get("isLoopbackDevice", False):
+            return d
+    return None
+
+
+def _find_output_for_loopback(
+    devices: list[DeviceInfo], loopback_info: DeviceInfo | None
+) -> DeviceInfo | None:
+    """The render (output) device that feeds a given loopback capture device.
+
+    PyAudioWPatch names a loopback ``"<output> [Loopback]"``; strip that suffix
+    to find the real output device so the keepalive plays on the right endpoint.
+    """
+    if not loopback_info:
+        return None
+    name = loopback_info["name"]
+    suffix = " [Loopback]"
+    base = name[: -len(suffix)] if name.endswith(suffix) else name
+    for d in devices:
+        if (
+            d["maxOutputChannels"] > 0
+            and not d.get("isLoopbackDevice", False)
+            and d["name"] == base
+        ):
             return d
     return None
 

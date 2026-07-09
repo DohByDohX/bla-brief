@@ -92,3 +92,30 @@ def test_loopback_prefix_fallback_when_no_exact_pairing():
     pa = FakePyAudio(devices, apis)
     _, loopback, _ = find_devices(pa)
     assert loopback["index"] == 1
+
+
+def test_explicit_loopback_moves_keepalive_output_to_match():
+    # Default output is the Lenovo headset (index 1), but the user explicitly
+    # picks the Realtek loopback (index 3). The keepalive/output device must
+    # follow that choice to its feeding output (index 0), otherwise the chosen
+    # endpoint stays idle and the system track comes back empty.
+    devices, apis = _headset_scenario()
+    pa = FakePyAudio(devices, apis)
+    _, loopback, output = find_devices(pa, loopback_index=3)
+    assert loopback["index"] == 3
+    assert output["index"] == 0  # Speakers (Realtek), not the default headset
+
+
+def test_explicit_loopback_without_matching_output_keeps_default():
+    # If no output matches the chosen loopback's name, fall back to the default
+    # output rather than losing the keepalive entirely.
+    devices = [
+        _dev(0, "Speakers (Realtek(R) Audio)", out=2),
+        _dev(1, "Orphan Loopback [Loopback]", inp=2, loopback=True),
+        _dev(2, "Microphone Array (Intel Smart Sound)", inp=2),
+    ]
+    apis = _wasapi(default_out=0, default_in=2)
+    pa = FakePyAudio(devices, apis)
+    _, loopback, output = find_devices(pa, loopback_index=1)
+    assert loopback["index"] == 1
+    assert output["index"] == 0  # default output preserved

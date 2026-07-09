@@ -265,6 +265,7 @@ def _produce_outputs(paths: RecordingPaths, args: argparse.Namespace, keep: set[
             args.mic_gain,
             args.sys_gain,
             sync_offset="auto",
+            report_path=paths.mixed_final,
         )
         if mixed_ok:
             # Publish atomically: a rename appears to a watch-folder transcriber
