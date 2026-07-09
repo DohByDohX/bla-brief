@@ -31,12 +31,14 @@ class StreamingDualRecorder:
         mic_path: Path,
         sys_path: Path,
         mic_index: int | None = None,
+        loopback_index: int | None = None,
         sample_rate: int = SAMPLE_RATE,
     ) -> None:
         self.mic_path = mic_path
         self.sys_path = sys_path
         self.sample_rate = sample_rate
         self.mic_index = mic_index
+        self.loopback_index = loopback_index
 
         # Cross-thread stop signal (set by ENTER thread, Ctrl+C handler, etc.).
         self._started = False
@@ -192,7 +194,7 @@ class StreamingDualRecorder:
 
         self._pa = pyaudio.PyAudio()
         self._mic_info, self._loopback_info, self._output_info = find_devices(
-            self._pa, self.mic_index
+            self._pa, self.mic_index, self.loopback_index
         )
 
         if not self._mic_info:

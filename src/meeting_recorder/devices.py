@@ -33,7 +33,9 @@ def _find_wasapi_api_index(pa: pyaudio.PyAudio) -> int | None:
 
 
 def find_devices(
-    pa: pyaudio.PyAudio, mic_index: int | None = None
+    pa: pyaudio.PyAudio,
+    mic_index: int | None = None,
+    loopback_index: int | None = None,
 ) -> tuple[DeviceInfo | None, DeviceInfo | None, DeviceInfo | None]:
     """Find the mic, loopback, and output devices.
 
@@ -50,6 +52,9 @@ def find_devices(
       3. WASAPI default input device
       4. Any WASAPI input device
 
+    When ``loopback_index`` is given it overrides the auto-detected system
+    (loopback) device.
+
     Returns:
         ``(mic_info, loopback_info, output_info)``; any element may be None.
     """
@@ -60,7 +65,10 @@ def find_devices(
     devices = [pa.get_device_info_by_index(i) for i in range(pa.get_device_count())]
 
     output_info = _find_output(pa, devices, wasapi_api_idx)
-    loopback_info = _find_loopback(devices, output_info)
+    if loopback_index is not None:
+        loopback_info: DeviceInfo | None = _info(pa, loopback_index)
+    else:
+        loopback_info = _find_loopback(devices, output_info)
     mic_info = _find_mic(pa, devices, output_info, wasapi_api_idx, mic_index)
 
     return mic_info, loopback_info, output_info
@@ -178,5 +186,81 @@ def list_devices() -> None:
                     f"{d['maxInputChannels']}ch  {int(d['defaultSampleRate'])}Hz{tag}"
                 )
         print()
+    finally:
+        pa.terminate()
+
+
+def _prompt_device(kind: str, options: list[DeviceInfo], default_index: int | None) -> int | None:
+    """Prompt for one device choice from ``options``.
+
+    Returns the chosen device index, or None to accept the auto-detected
+    default (which lets :func:`find_devices` keep its full auto behavior).
+    Falls back to the default on empty input, an invalid entry, or EOF/Ctrl+C.
+    """
+    valid = {int(d["index"]) for d in options}
+    default_hint = f" [{default_index}]" if default_index is not None else ""
+    try:
+        raw = input(f"  Choose {kind} device by number{default_hint} (Enter = default): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if not raw:
+        return None
+    try:
+        choice = int(raw)
+    except ValueError:
+        print(f"  Not a number; using default {kind} device.")
+        return None
+    if choice not in valid:
+        print(f"  {choice} is not a valid {kind} device; using default.")
+        return None
+    # Accepting the default explicitly still returns None so auto logic applies.
+    return None if choice == default_index else choice
+
+
+def select_devices_interactive(
+    pa: pyaudio.PyAudio,
+) -> tuple[int | None, int | None]:
+    """Interactively pick the mic and system (loopback) devices.
+
+    Prints the available input and loopback devices with the auto-detected
+    choices marked, then prompts for each. Returns
+    ``(mic_index, loopback_index)`` where either may be None to mean "use the
+    auto-detected default".
+    """
+    mic_info, loopback_info, _ = find_devices(pa)
+    devices = [pa.get_device_info_by_index(i) for i in range(pa.get_device_count())]
+
+    inputs = [
+        d for d in devices if d["maxInputChannels"] > 0 and not d.get("isLoopbackDevice", False)
+    ]
+    loopbacks = [d for d in devices if d.get("isLoopbackDevice", False)]
+
+    print("\n  === Input (mic) devices ===\n")
+    for d in inputs:
+        tag = "  <-- default" if mic_info and int(d["index"]) == int(mic_info["index"]) else ""
+        print(f"  [{int(d['index']):>2}] {d['name']:<55} {int(d['defaultSampleRate'])}Hz{tag}")
+    mic_default = int(mic_info["index"]) if mic_info else None
+    mic_choice = _prompt_device("mic", inputs, mic_default)
+
+    print("\n  === System (loopback) devices ===\n")
+    for d in loopbacks:
+        tag = (
+            "  <-- default"
+            if loopback_info and int(d["index"]) == int(loopback_info["index"])
+            else ""
+        )
+        print(f"  [{int(d['index']):>2}] {d['name']:<55} {int(d['defaultSampleRate'])}Hz{tag}")
+    sys_default = int(loopback_info["index"]) if loopback_info else None
+    sys_choice = _prompt_device("system", loopbacks, sys_default)
+    print()
+
+    return mic_choice, sys_choice
+
+
+def select_devices() -> tuple[int | None, int | None]:
+    """Open a temporary PyAudio, run the interactive picker, and clean up."""
+    pa = pyaudio.PyAudio()
+    try:
+        return select_devices_interactive(pa)
     finally:
         pa.terminate()

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from meeting_recorder.config import OUTPUT_DIR, SAMPLE_RATE
-from meeting_recorder.devices import list_devices
+from meeting_recorder.devices import list_devices, select_devices
 from meeting_recorder.logging_setup import configure_logging
 from meeting_recorder.mixing import create_mixed_file
 from meeting_recorder.recorder import StreamingDualRecorder
@@ -44,10 +44,46 @@ def sanitize_name(name: str) -> str:
     return re.sub(r"[^\w.-]", "_", name).strip("._") or "recording"
 
 
+#: The three producible outputs, used as the interactive keep-set vocabulary.
+ALL_OUTPUTS = frozenset({"mixed", "mic", "system"})
+
+_OUTPUT_ALIASES = {
+    "m": "mixed",
+    "mix": "mixed",
+    "mixed": "mixed",
+    "v": "mic",
+    "voice": "mic",
+    "mic": "mic",
+    "s": "system",
+    "sys": "system",
+    "system": "system",
+}
+
+
+def parse_output_choice(raw: str) -> set[str]:
+    """Parse an interactive output selection into a keep-set.
+
+    Accepts comma/space separated tokens using either letters ([m]ixed,
+    [v]oice, [s]ystem) or full words. Empty or fully-unrecognized input keeps
+    all three outputs (the safe default).
+    """
+    tokens = re.split(r"[,\s]+", raw.strip().lower())
+    chosen = {_OUTPUT_ALIASES[t] for t in tokens if t in _OUTPUT_ALIASES}
+    return chosen or set(ALL_OUTPUTS)
+
+
+def _prompt(message: str) -> str:
+    """Read a line of input, returning "" on EOF/Ctrl+C (never raising)."""
+    try:
+        return input(message).strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
 def build_paths(
     name: str | None,
     output_dir: Path,
-    tracks_dir: Path | None = None,
+    tracks_dir: str | Path | None = None,
     timestamp: str | None = None,
 ) -> RecordingPaths:
     """Compute all file paths for a recording.
@@ -89,6 +125,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--mic", type=int, default=None, help="Mic device ID (default: Windows default input)"
     )
     parser.add_argument(
+        "--system",
+        type=int,
+        default=None,
+        help="System/loopback device ID (default: auto, follows the default output)",
+    )
+    parser.add_argument(
         "--list-devices", "-l", action="store_true", help="List available devices and exit"
     )
     parser.add_argument(
@@ -113,6 +155,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--discard-tracks",
         action="store_true",
         help="Delete the raw mic/system tracks after a successful mix (keep only the mixed file).",
+    )
+    parser.add_argument(
+        "--interactive",
+        "-i",
+        action="store_true",
+        help="Prompt for input/system devices before recording, and for a name and "
+        "which outputs to keep after recording.",
     )
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     return parser.parse_args(argv)
@@ -170,24 +219,44 @@ def _run_recording_ui(recorder: StreamingDualRecorder, paths: RecordingPaths) ->
         recorder.request_stop()
 
 
-def _finalize(
-    recorder: StreamingDualRecorder, paths: RecordingPaths, args: argparse.Namespace
-) -> None:
-    """Stop the recorder, mix the tracks, and publish the result atomically."""
-    print("\n\n  Stopping recording...")
-    mic_samples, sys_samples = recorder.stop()
-    mic_rate = recorder._mic_native_rate or SAMPLE_RATE
-    sys_rate = recorder._sys_native_rate or SAMPLE_RATE
-    log.info("Mic: %s samples (%.1fs)", f"{mic_samples:,}", mic_samples / mic_rate)
-    log.info("Sys: %s samples (%.1fs)", f"{sys_samples:,}", sys_samples / sys_rate)
+def _safe_unlink(p: Path) -> None:
+    try:
+        p.unlink()
+    except OSError:
+        log.debug("Could not delete %s", p, exc_info=True)
 
+
+def _rename_recording(
+    old: RecordingPaths,
+    name: str,
+    output_dir: Path,
+    tracks_dir: str | None,
+    timestamp: str,
+) -> RecordingPaths:
+    """Rename the already-written raw tracks to embed a chosen name.
+
+    Returns updated paths (including the new mixed-file names). The same
+    ``timestamp`` is reused so the renamed files match the recording instant.
+    """
+    new = build_paths(name, output_dir, tracks_dir, timestamp=timestamp)
+    for src, dst in ((old.mic_path, new.mic_path), (old.sys_path, new.sys_path)):
+        if src.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(src, dst)
+    return new
+
+
+def _produce_outputs(paths: RecordingPaths, args: argparse.Namespace, keep: set[str]) -> None:
+    """Mix (when requested) and prune raw tracks according to the keep-set."""
     mic_ok = paths.mic_path.exists() and paths.mic_path.stat().st_size > 44
     sys_ok = paths.sys_path.exists() and paths.sys_path.stat().st_size > 44
 
-    if mic_ok and sys_ok:
-        if abs(recorder.sync_offset) > 0.05:
-            late = "system" if recorder.sync_offset > 0 else "mic"
-            log.info("Measured start offset: %s began %.2fs late.", late, abs(recorder.sync_offset))
+    want_mixed = "mixed" in keep
+    # --discard-tracks still forces raw tracks away after a mix (legacy flag).
+    want_mic = "mic" in keep and not args.discard_tracks
+    want_sys = "system" in keep and not args.discard_tracks
+
+    if want_mixed and mic_ok and sys_ok:
         log.info("Creating mixed file...")
         mixed_ok = create_mixed_file(
             paths.mic_path,
@@ -203,26 +272,60 @@ def _finalize(
             paths.mixed_final.parent.mkdir(parents=True, exist_ok=True)
             os.replace(paths.mixed_tmp, paths.mixed_final)
             log.info("Mixed file published to watch folder:\n    %s", paths.mixed_final)
-            if args.discard_tracks:
-                for p in (paths.mic_path, paths.sys_path):
-                    try:
-                        p.unlink()
-                    except OSError:
-                        log.debug("Could not delete track %s", p, exc_info=True)
-            else:
-                log.info("Raw tracks kept (not transcribed):\n    %s", paths.work_dir)
         else:
-            # Clean up the partial mixed file so no stray .part is left behind.
-            try:
-                paths.mixed_tmp.unlink()
-            except OSError:
-                log.debug("Could not delete partial mix %s", paths.mixed_tmp, exc_info=True)
-    elif mic_ok:
-        log.warning("System audio track is empty. Mic-only track saved: %s", paths.mic_path)
-    elif sys_ok:
-        log.warning("Mic track is empty. System-only track saved: %s", paths.sys_path)
-    else:
-        log.error("Both tracks are empty!")
+            _safe_unlink(paths.mixed_tmp)  # no stray .part left behind
+    elif want_mixed and mic_ok:
+        log.warning("System audio track is empty; cannot mix. Mic-only track kept.")
+    elif want_mixed and sys_ok:
+        log.warning("Mic track is empty; cannot mix. System-only track kept.")
+    elif want_mixed:
+        log.error("Both tracks are empty; nothing to mix!")
+
+    # Prune the raw tracks the user did not ask to keep.
+    if not want_mic:
+        _safe_unlink(paths.mic_path)
+    if not want_sys:
+        _safe_unlink(paths.sys_path)
+    if want_mic or want_sys:
+        log.info("Raw tracks kept in:\n    %s", paths.work_dir)
+
+
+def _finalize(
+    recorder: StreamingDualRecorder,
+    paths: RecordingPaths,
+    args: argparse.Namespace,
+    timestamp: str,
+    interactive: bool,
+) -> None:
+    """Stop the recorder, then (optionally interactively) name and emit outputs."""
+    print("\n\n  Stopping recording...")
+    mic_samples, sys_samples = recorder.stop()
+    mic_rate = recorder._mic_native_rate or SAMPLE_RATE
+    sys_rate = recorder._sys_native_rate or SAMPLE_RATE
+    log.info("Mic: %s samples (%.1fs)", f"{mic_samples:,}", mic_samples / mic_rate)
+    log.info("Sys: %s samples (%.1fs)", f"{sys_samples:,}", sys_samples / sys_rate)
+
+    if abs(recorder.sync_offset) > 0.05:
+        late = "system" if recorder.sync_offset > 0 else "mic"
+        log.info("Measured start offset: %s began %.2fs late.", late, abs(recorder.sync_offset))
+
+    # Feature: choose a name after recording (only if not preset via -n).
+    if interactive and not args.name:
+        name = _prompt("\n  Meeting name (Enter = keep timestamp): ")
+        if name:
+            paths = _rename_recording(
+                paths, name, Path(args.output_dir), args.tracks_dir, timestamp
+            )
+
+    # Feature: choose which outputs to keep.
+    keep = set(ALL_OUTPUTS)
+    if interactive:
+        keep = parse_output_choice(
+            _prompt("  Keep which outputs? [m]ixed  [v]oice  [s]ystem  (Enter = all): ")
+        )
+        log.info("Keeping: %s", ", ".join(sorted(keep)))
+
+    _produce_outputs(paths, args, keep)
 
     print("\n  Done!\n")
 
@@ -235,14 +338,26 @@ def main(argv: list[str] | None = None) -> None:
         list_devices()
         return
 
-    paths = build_paths(args.name, Path(args.output_dir), args.tracks_dir)
-
     _print_banner()
+
+    # Interactive device selection (Enter accepts the auto-detected default).
+    mic_index = args.mic
+    loopback_index = args.system
+    if args.interactive:
+        picked_mic, picked_sys = select_devices()
+        if args.mic is None:
+            mic_index = picked_mic
+        if args.system is None:
+            loopback_index = picked_sys
+
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
+    paths = build_paths(args.name, Path(args.output_dir), args.tracks_dir, timestamp=timestamp)
 
     recorder = StreamingDualRecorder(
         mic_path=paths.mic_path,
         sys_path=paths.sys_path,
-        mic_index=args.mic,
+        mic_index=mic_index,
+        loopback_index=loopback_index,
         sample_rate=SAMPLE_RATE,
     )
 
@@ -263,7 +378,7 @@ def main(argv: list[str] | None = None) -> None:
     signal.signal(signal.SIGINT, handle_signal)
 
     _run_recording_ui(recorder, paths)
-    _finalize(recorder, paths, args)
+    _finalize(recorder, paths, args, timestamp, args.interactive)
 
 
 if __name__ == "__main__":

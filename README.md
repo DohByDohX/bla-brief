@@ -32,15 +32,19 @@ python -m pip install -e ".[dev]"   # + test/lint/type tooling
 
 ```powershell
 python -m meeting_recorder                     # auto-named recording
+python -m meeting_recorder -i                  # interactive: pick devices, then name + outputs
 python -m meeting_recorder -n "weekly-sync"    # named recording
 python -m meeting_recorder -l                  # list audio devices
 python -m meeting_recorder --mic 15            # force a specific mic
+python -m meeting_recorder --system 17         # force a specific system/loopback device
 python -m meeting_recorder --discard-tracks    # keep only the mixed file
 python -m meeting_recorder --debug             # verbose logging
 ```
 
 Press **ENTER** (or **Ctrl+C**) to stop. Output defaults to
-`%LOCALAPPDATA%\audacity\Recordings`. Or double-click `Record Meeting.bat`.
+`%LOCALAPPDATA%\audacity\Recordings`. Or double-click `Record Meeting.bat`
+(which runs in `-i` interactive mode: it prompts for the mic/system devices
+before recording, then for a meeting name and which outputs to keep afterward).
 
 ## Project layout
 
