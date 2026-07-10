@@ -247,47 +247,74 @@ def _rename_recording(
 
 
 def _produce_outputs(paths: RecordingPaths, args: argparse.Namespace, keep: set[str]) -> None:
-    """Mix (when requested) and prune raw tracks according to the keep-set."""
+    """Mix (when requested), prune unselected tracks, and report what was kept."""
     mic_ok = paths.mic_path.exists() and paths.mic_path.stat().st_size > 44
     sys_ok = paths.sys_path.exists() and paths.sys_path.stat().st_size > 44
 
     want_mixed = "mixed" in keep
     # --discard-tracks still forces raw tracks away after a mix (legacy flag).
-    want_mic = "mic" in keep and not args.discard_tracks
-    want_sys = "system" in keep and not args.discard_tracks
+    keep_mic = "mic" in keep and not args.discard_tracks
+    keep_sys = "system" in keep and not args.discard_tracks
 
+    mixed_made = False
     if want_mixed and mic_ok and sys_ok:
         log.info("Creating mixed file...")
-        mixed_ok = create_mixed_file(
+        if create_mixed_file(
             paths.mic_path,
             paths.sys_path,
             paths.mixed_tmp,
             args.mic_gain,
             args.sys_gain,
             sync_offset="auto",
-            report_path=paths.mixed_final,
-        )
-        if mixed_ok:
+        ):
             # Publish atomically: a rename appears to a watch-folder transcriber
             # as a single finished file (never "still being written").
             paths.mixed_final.parent.mkdir(parents=True, exist_ok=True)
             os.replace(paths.mixed_tmp, paths.mixed_final)
-            log.info("Mixed file published to watch folder:\n    %s", paths.mixed_final)
+            mixed_made = True
         else:
             _safe_unlink(paths.mixed_tmp)  # no stray .part left behind
     elif want_mixed and mic_ok:
-        log.warning("System audio track is empty; cannot mix. Mic-only track kept.")
+        log.warning("System audio track is empty; cannot mix. Keeping the mic track instead.")
+        keep_mic = True  # fall back to the one usable track so nothing is lost
     elif want_mixed and sys_ok:
-        log.warning("Mic track is empty; cannot mix. System-only track kept.")
+        log.warning("Mic track is empty; cannot mix. Keeping the system track instead.")
+        keep_sys = True
     elif want_mixed:
         log.error("Both tracks are empty; nothing to mix!")
 
-    # Prune the raw tracks the user did not ask to keep.
-    if not want_mic:
+    # Prune the raw tracks that are not being kept.
+    if not keep_mic:
         _safe_unlink(paths.mic_path)
-    if not want_sys:
+    if not keep_sys:
         _safe_unlink(paths.sys_path)
-    if want_mic or want_sys:
+
+    _report_outputs(paths, mixed_made, keep_mic, keep_sys)
+
+
+def _report_outputs(
+    paths: RecordingPaths, mixed_made: bool, kept_mic: bool, kept_sys: bool
+) -> None:
+    """Summarize only the files that were actually left on disk."""
+    entries: list[tuple[Path, str]] = []
+    if mixed_made and paths.mixed_final.exists():
+        entries.append((paths.mixed_final, "mixed - for transcription"))
+    if kept_mic and paths.mic_path.exists():
+        entries.append((paths.mic_path, "your voice"))
+    if kept_sys and paths.sys_path.exists():
+        entries.append((paths.sys_path, "system/meeting audio"))
+
+    if not entries:
+        log.warning("No output files were produced.")
+        return
+
+    log.info("Output files:")
+    for path, label in entries:
+        size_mb = path.stat().st_size / (1024 * 1024)
+        log.info("  %-52s %6.1f MB  (%s)", path.name, size_mb, label)
+    if mixed_made:
+        log.info("Mixed file published to watch folder:\n    %s", paths.mixed_final)
+    if kept_mic or kept_sys:
         log.info("Raw tracks kept in:\n    %s", paths.work_dir)
 
 

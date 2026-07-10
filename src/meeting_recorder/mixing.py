@@ -64,7 +64,6 @@ def create_mixed_file(
     mic_gain: float = 1.0,
     sys_gain: float = 1.0,
     sync_offset: str | float = "auto",
-    report_path: Path | None = None,
 ) -> bool:
     """Create a normalized mixed WAV from the mic + system tracks.
 
@@ -82,10 +81,6 @@ def create_mixed_file(
         two streams stopped together, which the recorder guarantees).
       - float: use a measured offset (e.g., from callback timestamps).
       - ``0.0``: legacy frame-0 alignment (no correction).
-
-    ``report_path`` is the name to show in the "Output files" summary when the
-    mix is written to a temp file and renamed by the caller (so the log shows
-    the published name, not the ``.part`` temp).
 
     Returns:
         True on success, False if the tracks are missing/empty/unreadable.
@@ -215,17 +210,7 @@ def create_mixed_file(
         mic_wav.close()
         sys_wav.close()
 
-    size_mb = mixed_path.stat().st_size / (1024 * 1024)
-    mic_mb = mic_path.stat().st_size / (1024 * 1024)
-    sys_mb = sys_path.stat().st_size / (1024 * 1024)
-
-    # The mix is written to a temp ".part" file then renamed by the caller;
-    # show the caller-supplied final name (report_path) when given.
-    display_name = (report_path or mixed_path).name
-    log.info("Output files:")
-    log.info("  %-50s %6.1f MB  (mixed - for transcription)", display_name, size_mb)
-    log.info("  %-50s %6.1f MB  (your voice)", mic_path.name, mic_mb)
-    log.info("  %-50s %6.1f MB  (system/meeting audio)", sys_path.name, sys_mb)
-    log.info("Duration: %dm %ds", int(duration // 60), int(duration % 60))
-    log.info("Location: %s", mixed_path.parent)
+    # The caller (cli) owns the final "Output files" summary because only it
+    # knows which outputs the user chose to keep; here we just confirm the mix.
+    log.info("Mix complete: %dm %ds.", int(duration // 60), int(duration % 60))
     return True

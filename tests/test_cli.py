@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
+from support import write_sine_wav
+
 from meeting_recorder.cli import (
     ALL_OUTPUTS,
+    _produce_outputs,
     _rename_recording,
     build_paths,
     parse_output_choice,
@@ -98,3 +102,58 @@ def test_rename_recording_renames_tracks_and_returns_named_paths(tmp_path: Path)
     assert renamed.mixed_final.name == f"{ts}_team-sync.wav"
     assert renamed.mic_path.exists() and renamed.sys_path.exists()
     assert not original.mic_path.exists() and not original.sys_path.exists()
+
+
+def _args(**overrides: object) -> argparse.Namespace:
+    defaults = {"mic_gain": 1.0, "sys_gain": 1.0, "discard_tracks": False}
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def _paths_with_tracks(tmp_path: Path, *, mic_s: float, sys_s: float):
+    """Build a recording layout with mic/sys tracks of the given durations."""
+    out = tmp_path / "Recordings"
+    out.mkdir()
+    paths = build_paths("demo", out, timestamp="2026-07-09_1204")
+    write_sine_wav(paths.mic_path, mic_s, 16000)
+    write_sine_wav(paths.sys_path, sys_s, 48000)
+    return paths
+
+
+def test_produce_outputs_mixed_only_prunes_raw_tracks(tmp_path: Path):
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
+    _produce_outputs(paths, _args(), keep={"mixed"})
+
+    # Only the published mixed file survives; the raw tracks are removed.
+    assert paths.mixed_final.exists()
+    assert not paths.mic_path.exists()
+    assert not paths.sys_path.exists()
+    assert not paths.mixed_tmp.exists()  # no stray .part left behind
+
+
+def test_produce_outputs_keep_all_retains_every_file(tmp_path: Path):
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
+    _produce_outputs(paths, _args(), keep=set(ALL_OUTPUTS))
+
+    assert paths.mixed_final.exists()
+    assert paths.mic_path.exists()
+    assert paths.sys_path.exists()
+
+
+def test_produce_outputs_keeps_usable_track_when_mix_impossible(tmp_path: Path):
+    # System track empty (header only) -> cannot mix; the mic track must be
+    # kept as a fallback even though the user asked only for "mixed".
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.0)
+    _produce_outputs(paths, _args(), keep={"mixed"})
+
+    assert not paths.mixed_final.exists()
+    assert paths.mic_path.exists()  # preserved fallback
+
+
+def test_produce_outputs_discard_tracks_forces_mixed_only(tmp_path: Path):
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
+    _produce_outputs(paths, _args(discard_tracks=True), keep=set(ALL_OUTPUTS))
+
+    assert paths.mixed_final.exists()
+    assert not paths.mic_path.exists()
+    assert not paths.sys_path.exists()
