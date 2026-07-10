@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.2] - 2026-07-09
+
+### Fixed
+- Post-recording summary listed files that had just been pruned. When keeping
+  only the mixed output, the "Output files" block still showed the mic-only and
+  system-only tracks even though they were deleted. The summary now reports only
+  the files actually left on disk, with their real sizes.
+- "Cannot mix" fallback now truly keeps the one usable track. Previously, if a
+  mix was requested but one track was empty, the log claimed the surviving track
+  was kept while the prune step deleted it (leaving nothing). The usable track is
+  now preserved and reported.
+
+### Changed
+- Output reporting moved from `create_mixed_file()` (which now just confirms the
+  mix) into the CLI, which owns knowledge of the interactive keep-set.
+
 ## [4.3.1] - 2026-07-09
 
 ### Fixed
