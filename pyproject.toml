@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "meeting-recorder"
-version = "4.3.2"
+version = "4.4.0"
 description = "Dual-source (mic + system loopback) synchronized meeting audio recorder for Windows."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "numpy~=1.26",
     "PyAudioWPatch~=0.2.12",
+    "rich~=13.7",
 ]
 
 [project.optional-dependencies]

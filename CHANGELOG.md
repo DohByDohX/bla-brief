@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-07-18
+
+### Added
+- Framed console UI (built on `rich`): a minimalistic banner, device-selection
+  panels with the auto-detected default marked, a live recording panel (timer +
+  mic/system size meters), and an output-summary panel. Single Tesla-red
+  (`#E82127`) accent, no emoji.
+- New `meeting_recorder.ui` module centralizes all presentation; the rest of the
+  package stays logic-only.
+
+### Changed
+- Device listing/selection and the post-recording summary now render through the
+  UI module. Interactive prompts use a styled caret.
+
+### Notes
+- The styled UI is gated on an interactive TTY: when stdout is piped/redirected
+  (watch-folder, automation), everything falls back to plain text — the
+  non-interactive output shape is unchanged.
+- Adds a runtime dependency on `rich~=13.7`.
+
 ## [4.3.2] - 2026-07-09
 
 ### Fixed
