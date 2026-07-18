@@ -109,10 +109,20 @@ def render_device_panel(title: str, options: list[dict], default_index: int | No
 
 
 def prompt(message: str, default: str | None = None) -> str:
-    """Show a styled prompt and return the entered line (``""`` on EOF/Ctrl+C)."""
-    hint = f" [dim][{default}][/dim]" if default else ""
+    """Show a styled prompt and return the entered line (``""`` on EOF/Ctrl+C).
+
+    The ``message`` is rendered as literal text (never interpreted as markup),
+    so bracketed hints like ``[m]ixed`` survive intact.
+    """
+    line = Text("  ")
+    line.append(message)
+    if default:
+        line.append(f" [{default}]", style="dim")
+    line.append(" ")
+    line.append("›", style="accent")
+    line.append(" ")
     try:
-        console.print(f"  {message}{hint} [accent]›[/accent] ", end="")
+        console.print(line, end="")
         raw = input()
     except (EOFError, KeyboardInterrupt):
         console.print()
@@ -143,11 +153,14 @@ class RecordingView:
 
     def __enter__(self) -> RecordingView:
         if supports_ui():
+            # screen=True renders on the alternate screen buffer, which fully
+            # repaints every frame — this is resize-safe (an inline Live leaves
+            # stale, stacked panels when the terminal width changes mid-render).
             self._live = Live(
                 self._render("00:00:00", 0.0, 0.0),
                 console=console,
                 refresh_per_second=4,
-                transient=False,
+                screen=True,
             )
             self._live.__enter__()
         else:

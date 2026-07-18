@@ -103,6 +103,18 @@ def test_prompt_eof_returns_empty(monkeypatch):
     assert ui.prompt("name") == ""
 
 
+def test_prompt_preserves_bracketed_message(monkeypatch):
+    # Bracketed hints like [m]ixed must not be swallowed as rich markup.
+    con, sio = _console(terminal=False)
+    monkeypatch.setattr(ui, "console", con)
+    monkeypatch.setattr("builtins.input", lambda: "m")
+    assert ui.prompt("keep [m]ixed [v]oice [s]ystem", default="all") == "m"
+    out = sio.getvalue()
+    assert "[m]ixed [v]oice [s]ystem" in out
+    assert "[all]" in out
+    assert "\x1b[" not in out
+
+
 # -- output summary ----------------------------------------------------------
 
 

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The styled UI is gated on an interactive TTY: when stdout is piped/redirected
   (watch-folder, automation), everything falls back to plain text — the
   non-interactive output shape is unchanged.
+- The live recording panel renders on the alternate screen buffer so it stays
+  correct across terminal resizes (no stacked/duplicated panels).
 - Adds a runtime dependency on `rich~=13.7`.
 
 ## [4.3.2] - 2026-07-09
