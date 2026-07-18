@@ -22,3 +22,6 @@ venv/
 *.wav
 *.wav.part
 Recordings/
+
+# Throwaway UI design mockups (local only)
+ui-mockup*.html
