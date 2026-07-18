@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.3] - 2026-07-18
+
+### Changed
+- Interactive picker (`-i`) and device listing (`-l`) now show only WASAPI mic
+  devices. Windows exposes each physical mic once per host API (MME, DirectSound,
+  WASAPI), which cluttered the list with 2-3 duplicates of every device; since
+  the recorder only ever captures via WASAPI, the extras are noise. Falls back to
+  all inputs when WASAPI is unavailable or has no inputs. `--mic <id>` still
+  accepts any device index for power users.
+
 ## [4.3.2] - 2026-07-09
 
 ### Fixed

@@ -180,25 +180,43 @@ def _find_mic(
     return None
 
 
+def _selectable_inputs(devices: list[DeviceInfo], wasapi_api_idx: int | None) -> list[DeviceInfo]:
+    """Input (mic) devices worth offering in the picker / listing.
+
+    Windows exposes each physical mic once per host API (MME, DirectSound,
+    WASAPI), so a raw listing is cluttered with 2-3 duplicates of every device.
+    The recorder only ever captures via WASAPI, so we show just the WASAPI
+    inputs. Falls back to every input device when WASAPI is unavailable or has
+    no inputs, so the user is never left without a choice.
+    """
+    inputs = [
+        d for d in devices if d["maxInputChannels"] > 0 and not d.get("isLoopbackDevice", False)
+    ]
+    if wasapi_api_idx is None:
+        return inputs
+    wasapi_inputs = [d for d in inputs if d.get("hostApi") == wasapi_api_idx]
+    return wasapi_inputs or inputs
+
+
 def list_devices() -> None:
-    """Print all available input and loopback devices, marking the selected ones."""
+    """Print the available WASAPI input and loopback devices, marking selections."""
     pa = pyaudio.PyAudio()
     try:
         mic_info, loopback_info, _ = find_devices(pa)
         devices = [pa.get_device_info_by_index(i) for i in range(pa.get_device_count())]
+        inputs = _selectable_inputs(devices, _find_wasapi_api_index(pa))
 
         print("\n  === Input devices ===\n")
-        for d in devices:
-            if d["maxInputChannels"] > 0 and not d.get("isLoopbackDevice", False):
-                tag = (
-                    "  <-- SELECTED MIC"
-                    if mic_info and int(d["index"]) == int(mic_info["index"])
-                    else ""
-                )
-                print(
-                    f"  [{int(d['index']):>2}] {d['name']:<55} "
-                    f"{d['maxInputChannels']}ch  {int(d['defaultSampleRate'])}Hz{tag}"
-                )
+        for d in inputs:
+            tag = (
+                "  <-- SELECTED MIC"
+                if mic_info and int(d["index"]) == int(mic_info["index"])
+                else ""
+            )
+            print(
+                f"  [{int(d['index']):>2}] {d['name']:<55} "
+                f"{d['maxInputChannels']}ch  {int(d['defaultSampleRate'])}Hz{tag}"
+            )
 
         print("\n  === Loopback devices (system audio) ===\n")
         for d in devices:
@@ -249,17 +267,15 @@ def select_devices_interactive(
 ) -> tuple[int | None, int | None]:
     """Interactively pick the mic and system (loopback) devices.
 
-    Prints the available input and loopback devices with the auto-detected
-    choices marked, then prompts for each. Returns
+    Prints the available WASAPI input and loopback devices with the
+    auto-detected choices marked, then prompts for each. Returns
     ``(mic_index, loopback_index)`` where either may be None to mean "use the
     auto-detected default".
     """
     mic_info, loopback_info, _ = find_devices(pa)
     devices = [pa.get_device_info_by_index(i) for i in range(pa.get_device_count())]
 
-    inputs = [
-        d for d in devices if d["maxInputChannels"] > 0 and not d.get("isLoopbackDevice", False)
-    ]
+    inputs = _selectable_inputs(devices, _find_wasapi_api_index(pa))
     loopbacks = [d for d in devices if d.get("isLoopbackDevice", False)]
 
     print("\n  === Input (mic) devices ===\n")
