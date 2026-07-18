@@ -1,7 +1,6 @@
 # Meeting Recorder
 
-<!-- Replace OWNER with your GitHub username/org once the repo is pushed. -->
-[![CI](https://github.com/OWNER/meeting-recorder/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/meeting-recorder/actions/workflows/ci.yml)
+[![CI](https://github.com/DohByDohX/bla-brief/actions/workflows/ci.yml/badge.svg)](https://github.com/DohByDohX/bla-brief/actions/workflows/ci.yml)
 
 Dual-source audio capture for Windows: records your **microphone** and the
 **system audio** (other meeting participants) simultaneously into separate WAV
