@@ -55,6 +55,11 @@ def _fmt_rate(hz: float) -> str:
     return f"{hz / 1000:.1f} kHz"
 
 
+def _truncate(text: str, limit: int) -> str:
+    """Shorten ``text`` to ``limit`` chars with an ellipsis when it overflows."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 # -- Banner ------------------------------------------------------------------
 
 
@@ -96,7 +101,7 @@ def render_device_panel(title: str, options: list[dict], default_index: int | No
         marker = "[default]●[/default]" if is_default else ""
         table.add_row(
             Text(str(idx), style="default" if is_default else "dim"),
-            Text(d["name"], style=style),
+            Text(_truncate(d["name"], 46), style=style),
             Text(_fmt_rate(d["defaultSampleRate"]), style=style),
             marker,
         )

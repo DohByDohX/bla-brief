@@ -82,6 +82,19 @@ def test_device_panel_tty_renders_title_and_names(monkeypatch):
     assert "Microphone Array" in out
 
 
+def test_device_panel_long_name_keeps_index_and_rate(monkeypatch):
+    # A long device name must not squeeze the index/rate columns out.
+    sio = io.StringIO()
+    con = Console(file=sio, force_terminal=True, width=72, theme=ui.THEME, highlight=False)
+    monkeypatch.setattr(ui, "console", con)
+    long_name = "Microphone Array (Intel Smart Sound Technology for Digital Microphones)"
+    ui.render_device_panel("mic device", [_dev(9, long_name, 48000)], 9)
+    out = sio.getvalue()
+    assert "9" in out  # index survives
+    assert "48.0 kHz" in out  # full rate, not truncated to "48.…"
+    assert "…" in out  # the long name is the thing that gets ellipsized
+
+
 # -- prompt ------------------------------------------------------------------
 
 
