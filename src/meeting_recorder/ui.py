@@ -39,6 +39,11 @@ THEME = Theme(
 
 console = Console(theme=THEME, highlight=False)
 
+#: Fixed width of the live recording panel. A constant width keeps rich's Live
+#: line accounting stable across terminal resizes (a full-width panel changes
+#: width on every resize and leaves stacked, duplicated panels).
+LIVE_WIDTH = 72
+
 
 def supports_ui() -> bool:
     """True when the styled UI should render (stdout is an interactive TTY)."""
@@ -104,6 +109,7 @@ def render_device_panel(title: str, options: list[dict], default_index: int | No
             border_style="dim",
             box=box.ROUNDED,
             padding=(0, 1),
+            expand=False,
         )
     )
 
@@ -153,14 +159,10 @@ class RecordingView:
 
     def __enter__(self) -> RecordingView:
         if supports_ui():
-            # screen=True renders on the alternate screen buffer, which fully
-            # repaints every frame — this is resize-safe (an inline Live leaves
-            # stale, stacked panels when the terminal width changes mid-render).
             self._live = Live(
                 self._render("00:00:00", 0.0, 0.0),
                 console=console,
                 refresh_per_second=4,
-                screen=True,
             )
             self._live.__enter__()
         else:
@@ -207,6 +209,7 @@ class RecordingView:
             border_style="dim",
             box=box.ROUNDED,
             padding=(0, 1),
+            width=LIVE_WIDTH,
             subtitle="[dim]press ENTER to stop[/dim]",
             subtitle_align="right",
         )
@@ -255,6 +258,7 @@ def output_summary(
             border_style="dim",
             box=box.ROUNDED,
             padding=(0, 1),
+            expand=False,
         )
     )
     if published:
