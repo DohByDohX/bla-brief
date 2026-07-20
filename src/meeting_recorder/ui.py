@@ -164,10 +164,13 @@ class RecordingView:
 
     def __enter__(self) -> RecordingView:
         if supports_ui():
+            # auto_refresh=False: every repaint is driven from update(), so no
+            # background refresh thread races our updates. That race left a
+            # duplicated top border on the first frame.
             self._live = Live(
                 self._render("00:00:00", 0.0, 0.0),
                 console=console,
-                refresh_per_second=4,
+                auto_refresh=False,
             )
             self._live.__enter__()
         else:
@@ -175,10 +178,10 @@ class RecordingView:
         return self
 
     def update(self, timer: str, mic_mb: float, sys_mb: float) -> None:
-        """Refresh the panel (TTY) or do nothing (plain line handled by caller)."""
+        """Repaint the panel (TTY) or do nothing (plain line handled by caller)."""
         if self._live is not None:
             self._pulse = not self._pulse
-            self._live.update(self._render(timer, mic_mb, sys_mb))
+            self._live.update(self._render(timer, mic_mb, sys_mb), refresh=True)
 
     def __exit__(
         self,
