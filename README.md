@@ -14,6 +14,9 @@ tracks, then produces a normalized **mixed** file suitable for transcription.
 - Watch-folder safe: raw tracks live outside the output folder and the mixed
   file is published via an atomic rename, so a `*.wav` watcher only ever sees a
   single finished file.
+- **Built-in transcription** (optional): after recording, the mixed file is
+  transcribed locally with faster-whisper into a Markdown transcript — no
+  external app or background service. Runs **fully offline** (see below).
 
 ## Requirements
 
@@ -23,8 +26,9 @@ tracks, then produces a normalized **mixed** file suitable for transcription.
 ## Install
 
 ```powershell
-python -m pip install -e .          # runtime
-python -m pip install -e ".[dev]"   # + test/lint/type tooling
+python -m pip install -e .                  # runtime
+python -m pip install -e ".[dev]"           # + test/lint/type tooling
+python -m pip install -e ".[transcribe]"    # + local transcription (faster-whisper, CUDA, truststore)
 ```
 
 ## Usage
@@ -45,6 +49,39 @@ Press **ENTER** (or **Ctrl+C**) to stop. Output defaults to
 (which runs in `-i` interactive mode: it prompts for the mic/system devices
 before recording, then for a meeting name and which outputs to keep afterward).
 
+## Transcription (optional)
+
+With the `transcribe` extra installed, a finished recording is transcribed
+locally into a Markdown file, and (optionally) a downstream catch-up automation
+is fired. Nothing runs in the background between meetings — the model loads,
+transcribes, and exits with the recorder.
+
+**Offline-first (company-PC safe).** Normal transcription makes **zero network
+calls**: the model is read from the local cache with `HF_HUB_OFFLINE=1` enforced
+in code. Fetch the model once, up front, on an approved network:
+
+```powershell
+python -m meeting_recorder --download-model     # one-time online cache fetch, then exits
+```
+
+That is the **only** step that goes online, and it validates TLS against the
+Windows certificate store (via `truststore`) rather than disabling any check.
+GPU is used automatically when available (CUDA libraries ship in the extra),
+falling back to CPU otherwise.
+
+```powershell
+python -m meeting_recorder --no-transcribe      # record only, skip transcription
+python -m meeting_recorder --stt-model small.en # override the model
+python -m meeting_recorder --stt-device cpu     # force CPU (default: auto)
+python -m meeting_recorder --keep-audio         # keep the mixed .wav after transcribing
+python -m meeting_recorder --no-automation      # transcribe but don't fire the catch-up script
+```
+
+Transcripts default to the folder in
+[`config.py`](src/meeting_recorder/config.py) (`TRANSCRIPT_DIR`); override per
+run with `--transcript-dir`. On success the mixed `.wav` is deleted (keep it
+with `--keep-audio`); on any failure the audio is preserved.
+
 ## Project layout
 
 ```
@@ -54,11 +91,13 @@ src/meeting_recorder/
   devices.py        mic / loopback / output device discovery
   recorder.py       StreamingDualRecorder (capture to disk)
   mixing.py         normalized, sample-rate-aware mixdown
+  transcription.py  offline-first local STT (faster-whisper) + transcript write
   cli.py            argument parsing + run orchestration
 tests/
   test_mixing.py    unit: alignment, resampling, normalization (no hardware)
   test_devices.py   unit: device-selection logic (fake PyAudio)
-  test_cli.py       unit: filename sanitization, path layout
+  test_cli.py       unit: filename sanitization, path layout, transcription hook
+  test_transcription.py  unit: STT device fallback, offline enforcement, writes
   integration/      end-to-end tests that need real audio hardware
 ```
 
