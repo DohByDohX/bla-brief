@@ -14,8 +14,15 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from meeting_recorder import __version__, ui
-from meeting_recorder.config import OUTPUT_DIR, SAMPLE_RATE
+from meeting_recorder import __version__, transcription, ui
+from meeting_recorder.config import (
+    OUTPUT_DIR,
+    SAMPLE_RATE,
+    STT_DEVICE,
+    STT_LANGUAGE,
+    STT_MODEL,
+    TRANSCRIPT_DIR,
+)
 from meeting_recorder.devices import list_devices, select_devices
 from meeting_recorder.logging_setup import configure_logging
 from meeting_recorder.mixing import create_mixed_file
@@ -155,6 +162,37 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Prompt for input/system devices before recording, and for a name and "
         "which outputs to keep after recording.",
+    )
+    parser.add_argument(
+        "--transcribe",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Transcribe the mixed file after recording (default: on). Use --no-transcribe "
+        "to skip.",
+    )
+    parser.add_argument(
+        "--stt-model", default=STT_MODEL, help=f"Whisper model to use (default: {STT_MODEL})"
+    )
+    parser.add_argument(
+        "--stt-language",
+        default=STT_LANGUAGE,
+        help=f"Transcription language hint (default: {STT_LANGUAGE})",
+    )
+    parser.add_argument(
+        "--stt-device",
+        default=STT_DEVICE,
+        choices=("auto", "cuda", "cpu"),
+        help=f"Transcription backend (default: {STT_DEVICE}; 'auto' tries GPU then CPU).",
+    )
+    parser.add_argument(
+        "--transcript-dir",
+        default=str(TRANSCRIPT_DIR),
+        help=f"Where to write the .md transcript (default: {TRANSCRIPT_DIR})",
+    )
+    parser.add_argument(
+        "--keep-audio",
+        action="store_true",
+        help="Keep the mixed .wav after a successful transcription (default: delete it).",
     )
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     return parser.parse_args(argv)
@@ -324,6 +362,42 @@ def _report_outputs(
     ui.output_summary(entries, published=published, tracks_dir=tracks_dir)
 
 
+def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> None:
+    """Transcribe the mixed file, write the .md, and remove the wav on success.
+
+    Best-effort: any failure is logged and the audio is left in place so a
+    recording is never lost to a transcription problem. Does nothing when there
+    is no mixed file (e.g. the user chose not to keep it).
+    """
+    if not paths.mixed_final.exists():
+        log.warning("No mixed file to transcribe; skipping transcription.")
+        return
+
+    dest_md = Path(args.transcript_dir) / f"{paths.mixed_final.stem}.md"
+    try:
+        result = transcription.transcribe_file(
+            paths.mixed_final,
+            model=args.stt_model,
+            device=args.stt_device,
+            language=args.stt_language,
+        )
+    except Exception as exc:  # noqa: BLE001 - never lose audio to a transcription error
+        log.error("Transcription failed (%s); keeping the audio file.", exc)
+        return
+
+    if not result.text.strip():
+        log.warning("Transcription produced no text; keeping the audio, not writing a transcript.")
+        return
+
+    md_path = transcription.write_transcript(result.text, dest_md)
+    log.info("Transcript written to %s (%s).", md_path, result.device)
+    print(f"\n  Transcript: {md_path}")
+
+    if not args.keep_audio:
+        _safe_unlink(paths.mixed_final)
+        log.info("Removed mixed audio %s after transcription.", paths.mixed_final.name)
+
+
 def _finalize(
     recorder: StreamingDualRecorder,
     paths: RecordingPaths,
@@ -358,6 +432,9 @@ def _finalize(
         log.info("Keeping: %s", ", ".join(sorted(keep)))
 
     _produce_outputs(paths, args, keep)
+
+    if args.transcribe:
+        _transcribe_recording(paths, args)
 
     print("\n  Done!\n")
 
