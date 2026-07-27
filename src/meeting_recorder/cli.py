@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from meeting_recorder import __version__, ui
 from meeting_recorder.config import OUTPUT_DIR, SAMPLE_RATE
 from meeting_recorder.devices import list_devices, select_devices
 from meeting_recorder.logging_setup import configure_logging
@@ -70,14 +71,6 @@ def parse_output_choice(raw: str) -> set[str]:
     tokens = re.split(r"[,\s]+", raw.strip().lower())
     chosen = {_OUTPUT_ALIASES[t] for t in tokens if t in _OUTPUT_ALIASES}
     return chosen or set(ALL_OUTPUTS)
-
-
-def _prompt(message: str) -> str:
-    """Read a line of input, returning "" on EOF/Ctrl+C (never raising)."""
-    try:
-        return input(message).strip()
-    except (EOFError, KeyboardInterrupt):
-        return ""
 
 
 def build_paths(
@@ -168,37 +161,45 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _print_banner() -> None:
-    print()
-    print("  +================================================+")
-    print("  |        MEETING RECORDER - Dual Capture  v4      |")
-    print("  |  Mic (your voice) + System (meeting audio)      |")
-    print("  |  Synchronized capture - streams to disk         |")
-    print("  +================================================+")
-    print()
+    ui.print_banner(__version__)
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    """Format elapsed seconds as HH:MM:SS."""
+    mins, secs = divmod(int(seconds), 60)
+    hrs, mins = divmod(mins, 60)
+    return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+
+
+def _track_sizes(paths: RecordingPaths) -> tuple[float, float]:
+    """Current on-disk sizes (MB) of the mic and system tracks."""
+    try:
+        mic_mb = paths.mic_path.stat().st_size / (1024 * 1024)
+        sys_mb = paths.sys_path.stat().st_size / (1024 * 1024)
+    except OSError:
+        return 0.0, 0.0
+    return mic_mb, sys_mb
+
+
+def _device_line(recorder: StreamingDualRecorder) -> str:
+    """Short 'mic -> system' description shown in the recording panel."""
+
+    def _short(info: dict | None, fallback: str) -> str:
+        if not info:
+            return fallback
+        name = str(info["name"])
+        return name if len(name) <= 24 else name[:23] + "…"
+
+    mic_k = (recorder._mic_native_rate or SAMPLE_RATE) // 1000
+    sys_k = (recorder._sys_native_rate or SAMPLE_RATE) // 1000
+    mic = _short(recorder._mic_info, "mic")
+    system = _short(recorder._loopback_info, "system")
+    return f"{mic} {mic_k}k → {system} {sys_k}k"
 
 
 def _run_recording_ui(recorder: StreamingDualRecorder, paths: RecordingPaths) -> None:
-    """Drive the interactive timer + ENTER/Ctrl+C stop loop while recording."""
-    print("  RECORDING... Press ENTER to stop.\n")
+    """Drive the live recording view + ENTER/Ctrl+C stop loop while recording."""
     start_time = time.time()
-
-    def timer_display() -> None:
-        while recorder.is_recording:
-            elapsed = time.time() - start_time
-            mins, secs = divmod(int(elapsed), 60)
-            hrs, mins = divmod(mins, 60)
-            try:
-                mic_sz = paths.mic_path.stat().st_size / (1024 * 1024)
-                sys_sz = paths.sys_path.stat().st_size / (1024 * 1024)
-            except OSError:
-                mic_sz = sys_sz = 0
-            print(
-                f"\r  Elapsed: {hrs:02d}:{mins:02d}:{secs:02d}  |  "
-                f"Mic: {mic_sz:.1f}MB  Sys: {sys_sz:.1f}MB",
-                end="",
-                flush=True,
-            )
-            time.sleep(2)
 
     def wait_for_enter() -> None:
         # ENTER and the SIGINT handler both request stop, so the poll loop
@@ -209,14 +210,27 @@ def _run_recording_ui(recorder: StreamingDualRecorder, paths: RecordingPaths) ->
             pass
         recorder.request_stop()
 
-    threading.Thread(target=timer_display, daemon=True).start()
     threading.Thread(target=wait_for_enter, daemon=True).start()
 
-    try:
-        while recorder.is_recording:
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        recorder.request_stop()
+    tty = ui.supports_ui()
+    with ui.RecordingView(_device_line(recorder)) as view:
+        try:
+            while recorder.is_recording:
+                elapsed = time.time() - start_time
+                mic_mb, sys_mb = _track_sizes(paths)
+                if tty:
+                    view.update(_fmt_elapsed(elapsed), mic_mb, sys_mb)
+                    time.sleep(0.25)
+                else:
+                    print(
+                        f"\r  Elapsed: {_fmt_elapsed(elapsed)}  |  "
+                        f"Mic: {mic_mb:.1f}MB  Sys: {sys_mb:.1f}MB",
+                        end="",
+                        flush=True,
+                    )
+                    time.sleep(2)
+        except KeyboardInterrupt:
+            recorder.request_stop()
 
 
 def _safe_unlink(p: Path) -> None:
@@ -296,26 +310,18 @@ def _report_outputs(
     paths: RecordingPaths, mixed_made: bool, kept_mic: bool, kept_sys: bool
 ) -> None:
     """Summarize only the files that were actually left on disk."""
-    entries: list[tuple[Path, str]] = []
+    files: list[tuple[Path, str]] = []
     if mixed_made and paths.mixed_final.exists():
-        entries.append((paths.mixed_final, "mixed - for transcription"))
+        files.append((paths.mixed_final, "mixed - for transcription"))
     if kept_mic and paths.mic_path.exists():
-        entries.append((paths.mic_path, "your voice"))
+        files.append((paths.mic_path, "your voice"))
     if kept_sys and paths.sys_path.exists():
-        entries.append((paths.sys_path, "system/meeting audio"))
+        files.append((paths.sys_path, "system/meeting audio"))
 
-    if not entries:
-        log.warning("No output files were produced.")
-        return
-
-    log.info("Output files:")
-    for path, label in entries:
-        size_mb = path.stat().st_size / (1024 * 1024)
-        log.info("  %-52s %6.1f MB  (%s)", path.name, size_mb, label)
-    if mixed_made:
-        log.info("Mixed file published to watch folder:\n    %s", paths.mixed_final)
-    if kept_mic or kept_sys:
-        log.info("Raw tracks kept in:\n    %s", paths.work_dir)
+    entries = [(p.name, p.stat().st_size / (1024 * 1024), label) for p, label in files]
+    published = str(paths.mixed_final) if mixed_made else None
+    tracks_dir = str(paths.work_dir) if (kept_mic or kept_sys) else None
+    ui.output_summary(entries, published=published, tracks_dir=tracks_dir)
 
 
 def _finalize(
@@ -339,7 +345,7 @@ def _finalize(
 
     # Feature: choose a name after recording (only if not preset via -n).
     if interactive and not args.name:
-        name = _prompt("\n  Meeting name (Enter = keep timestamp): ")
+        name = ui.prompt("meeting name", default="keep timestamp")
         if name:
             paths = _rename_recording(
                 paths, name, Path(args.output_dir), args.tracks_dir, timestamp
@@ -348,9 +354,7 @@ def _finalize(
     # Feature: choose which outputs to keep.
     keep = set(ALL_OUTPUTS)
     if interactive:
-        keep = parse_output_choice(
-            _prompt("  Keep which outputs? [m]ixed  [v]oice  [s]ystem  (Enter = all): ")
-        )
+        keep = parse_output_choice(ui.prompt("keep [m]ixed [v]oice [s]ystem", default="all"))
         log.info("Keeping: %s", ", ".join(sorted(keep)))
 
     _produce_outputs(paths, args, keep)

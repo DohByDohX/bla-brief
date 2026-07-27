@@ -13,6 +13,8 @@ from typing import cast
 
 import pyaudiowpatch as pyaudio
 
+from meeting_recorder import ui
+
 log = logging.getLogger(__name__)
 
 DeviceInfo = dict
@@ -205,32 +207,12 @@ def list_devices() -> None:
         mic_info, loopback_info, _ = find_devices(pa)
         devices = [pa.get_device_info_by_index(i) for i in range(pa.get_device_count())]
         inputs = _selectable_inputs(devices, _find_wasapi_api_index(pa))
+        loopbacks = [d for d in devices if d.get("isLoopbackDevice", False)]
 
-        print("\n  === Input devices ===\n")
-        for d in inputs:
-            tag = (
-                "  <-- SELECTED MIC"
-                if mic_info and int(d["index"]) == int(mic_info["index"])
-                else ""
-            )
-            print(
-                f"  [{int(d['index']):>2}] {d['name']:<55} "
-                f"{d['maxInputChannels']}ch  {int(d['defaultSampleRate'])}Hz{tag}"
-            )
-
-        print("\n  === Loopback devices (system audio) ===\n")
-        for d in devices:
-            if d.get("isLoopbackDevice", False):
-                tag = (
-                    "  <-- SELECTED"
-                    if loopback_info and int(d["index"]) == int(loopback_info["index"])
-                    else ""
-                )
-                print(
-                    f"  [{int(d['index']):>2}] {d['name']:<55} "
-                    f"{d['maxInputChannels']}ch  {int(d['defaultSampleRate'])}Hz{tag}"
-                )
-        print()
+        mic_default = int(mic_info["index"]) if mic_info else None
+        sys_default = int(loopback_info["index"]) if loopback_info else None
+        ui.render_device_panel("input devices", inputs, mic_default)
+        ui.render_device_panel("loopback devices (system audio)", loopbacks, sys_default)
     finally:
         pa.terminate()
 
@@ -243,20 +225,19 @@ def _prompt_device(kind: str, options: list[DeviceInfo], default_index: int | No
     Falls back to the default on empty input, an invalid entry, or EOF/Ctrl+C.
     """
     valid = {int(d["index"]) for d in options}
-    default_hint = f" [{default_index}]" if default_index is not None else ""
-    try:
-        raw = input(f"  Choose {kind} device by number{default_hint} (Enter = default): ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return None
+    raw = ui.prompt(
+        f"choose {kind} device",
+        default=str(default_index) if default_index is not None else None,
+    )
     if not raw:
         return None
     try:
         choice = int(raw)
     except ValueError:
-        print(f"  Not a number; using default {kind} device.")
+        ui.console.print(f"  [dim]not a number; using default {kind} device.[/dim]")
         return None
     if choice not in valid:
-        print(f"  {choice} is not a valid {kind} device; using default.")
+        ui.console.print(f"  [dim]{choice} is not a valid {kind} device; using default.[/dim]")
         return None
     # Accepting the default explicitly still returns None so auto logic applies.
     return None if choice == default_index else choice
@@ -278,24 +259,13 @@ def select_devices_interactive(
     inputs = _selectable_inputs(devices, _find_wasapi_api_index(pa))
     loopbacks = [d for d in devices if d.get("isLoopbackDevice", False)]
 
-    print("\n  === Input (mic) devices ===\n")
-    for d in inputs:
-        tag = "  <-- default" if mic_info and int(d["index"]) == int(mic_info["index"]) else ""
-        print(f"  [{int(d['index']):>2}] {d['name']:<55} {int(d['defaultSampleRate'])}Hz{tag}")
     mic_default = int(mic_info["index"]) if mic_info else None
+    ui.render_device_panel("mic device", inputs, mic_default)
     mic_choice = _prompt_device("mic", inputs, mic_default)
 
-    print("\n  === System (loopback) devices ===\n")
-    for d in loopbacks:
-        tag = (
-            "  <-- default"
-            if loopback_info and int(d["index"]) == int(loopback_info["index"])
-            else ""
-        )
-        print(f"  [{int(d['index']):>2}] {d['name']:<55} {int(d['defaultSampleRate'])}Hz{tag}")
     sys_default = int(loopback_info["index"]) if loopback_info else None
+    ui.render_device_panel("system device", loopbacks, sys_default)
     sys_choice = _prompt_device("system", loopbacks, sys_default)
-    print()
 
     return mic_choice, sys_choice
 
