@@ -194,6 +194,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Keep the mixed .wav after a successful transcription (default: delete it).",
     )
+    parser.add_argument(
+        "--download-model",
+        action="store_true",
+        help="Fetch the transcription model into the local cache and exit (the only "
+        "step that goes online). Run once on an approved network; recordings then "
+        "transcribe fully offline.",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     return parser.parse_args(argv)
 
@@ -445,6 +452,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.list_devices:
         list_devices()
+        return
+
+    if args.download_model:
+        # The single sanctioned online step; populates the cache, then exits.
+        transcription.download_model(args.stt_model)
+        print(f"\n  Model '{args.stt_model}' cached. Recordings now transcribe offline.\n")
         return
 
     _print_banner()

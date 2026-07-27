@@ -6,6 +6,13 @@ backend is used when its libraries load successfully; otherwise the code falls
 back to CPU transparently, so a machine without a working CUDA stack still
 produces transcripts (just slower).
 
+OFFLINE-FIRST (company-PC safe): normal transcription makes **no network calls**.
+It reads the model only from the local HuggingFace cache with ``HF_HUB_OFFLINE``
+set, so recording never reaches out to the internet. The one-time model fetch is
+an explicit, separate step (:func:`download_model`, exposed as the
+``--download-model`` CLI flag) which is the only path that goes online -- and it
+still validates TLS against the OS trust store rather than disabling any check.
+
 ``faster-whisper`` is an *optional* dependency (the ``transcribe`` extra). It is
 imported lazily so the core recorder keeps working when the extra isn't
 installed; calling :func:`transcribe_file` without it raises a clear error.
@@ -16,6 +23,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -94,6 +102,21 @@ def _inject_system_trust_store() -> None:
         log.debug("truststore injection failed", exc_info=True)
 
 
+def _enable_offline() -> None:
+    """Force HuggingFace into offline mode so no network call is ever made.
+
+    Company-PC safety: normal transcription must read the model from the local
+    cache only. Setting these before ``huggingface_hub`` is imported makes it
+    raise a clear local-cache-miss error rather than reaching out to the
+    network; if it is already imported, we also flip its cached constant.
+    """
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    constants = sys.modules.get("huggingface_hub.constants")
+    if constants is not None:  # already imported: update the evaluated flag
+        constants.HF_HUB_OFFLINE = True  # type: ignore[attr-defined]
+
+
 def _candidate_devices(device: str) -> list[str]:
     """Resolve a device preference into an ordered list to attempt.
 
@@ -131,6 +154,11 @@ def transcribe_file(
 ) -> TranscriptionResult:
     """Transcribe ``wav_path`` and return the recognized text plus metadata.
 
+    Runs fully offline (no network): the model is read from the local cache
+    only. If the model has not been fetched yet, load fails and this raises
+    ``RuntimeError`` -- run :func:`download_model` (``--download-model``) once on
+    an approved network first.
+
     Attempts each candidate device in order (see :func:`_candidate_devices`),
     falling back to the next when a backend cannot be initialized. Raises
     ``FileNotFoundError`` if the audio is missing, or ``RuntimeError`` if no
@@ -139,7 +167,7 @@ def transcribe_file(
     if not wav_path.exists():
         raise FileNotFoundError(f"Audio file not found: {wav_path}")
 
-    _inject_system_trust_store()
+    _enable_offline()  # no network during a normal recording
     _register_cuda_dll_dirs()
 
     last_error: Exception | None = None
@@ -163,6 +191,21 @@ def transcribe_file(
         )
 
     raise RuntimeError(f"No transcription backend could be loaded (last error: {last_error})")
+
+
+def download_model(model: str = "base.en") -> None:
+    """Fetch ``model`` into the local cache -- the only online operation.
+
+    This is the sanctioned one-time step to populate the HuggingFace cache so
+    that all later recordings run offline. It validates TLS against the OS trust
+    store (via truststore) instead of disabling any certificate check, and does
+    not force offline mode. Loads on CPU since it only needs to download.
+    """
+    _inject_system_trust_store()
+    _register_cuda_dll_dirs()
+    log.info("Downloading transcription model '%s' into the local cache...", model)
+    _load_whisper_model(model, "cpu", "int8")
+    log.info("Model '%s' is cached; recordings can now transcribe offline.", model)
 
 
 def write_transcript(text: str, dest_md: Path) -> Path:

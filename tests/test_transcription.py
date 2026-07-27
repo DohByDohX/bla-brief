@@ -7,6 +7,7 @@ neither the optional dependency nor a downloaded model.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -151,3 +152,48 @@ def test_register_cuda_dll_dirs_is_best_effort(monkeypatch):
     # Should never raise, even when the nvidia packages are absent.
     monkeypatch.setattr(transcription.importlib.util, "find_spec", lambda name: None)
     transcription._register_cuda_dll_dirs()
+
+
+# -- offline-first enforcement -----------------------------------------------
+
+
+def test_enable_offline_sets_env_flags(monkeypatch):
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    transcription._enable_offline()
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
+
+
+def test_transcribe_runs_offline_and_never_online(tmp_path: Path, monkeypatch):
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF")
+    calls = {"offline": 0, "trust": 0}
+    monkeypatch.setattr(transcription, "_enable_offline", lambda: calls.__setitem__("offline", 1))
+    monkeypatch.setattr(
+        transcription, "_inject_system_trust_store", lambda: calls.__setitem__("trust", 1)
+    )
+    monkeypatch.setattr(transcription, "_load_whisper_model", lambda *a, **k: _FakeModel([" hi"]))
+
+    transcription.transcribe_file(wav, device="cpu")
+
+    assert calls["offline"] == 1  # offline enforced
+    assert calls["trust"] == 0  # no online trust-store path during recording
+
+
+def test_download_model_goes_online_and_loads_on_cpu(monkeypatch):
+    calls: dict[str, object] = {"trust": 0}
+    monkeypatch.setattr(
+        transcription, "_inject_system_trust_store", lambda: calls.__setitem__("trust", 1)
+    )
+
+    def fake_load(model_size: str, device: str, compute_type: str):
+        calls["loaded"] = (model_size, device, compute_type)
+        return _FakeModel([])
+
+    monkeypatch.setattr(transcription, "_load_whisper_model", fake_load)
+
+    transcription.download_model("base.en")
+
+    assert calls["trust"] == 1  # download validates via OS trust store
+    assert calls["loaded"] == ("base.en", "cpu", "int8")

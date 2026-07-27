@@ -4,6 +4,17 @@ Dual-source (mic + WASAPI system loopback) synchronized audio recorder for **Win
 Python 3.12. See [README.md](README.md) for install, usage, and the full project layout —
 do not duplicate that content here.
 
+> ## ⚠️ OFFLINE-FIRST — non-negotiable (company PC)
+> This runs on a corporate machine. **Transcription must make ZERO network calls during a
+> recording.** The faster-whisper model is read from the local cache only, with
+> `HF_HUB_OFFLINE=1` enforced in code ([transcription.py](src/meeting_recorder/transcription.py)).
+> - The **only** sanctioned online action is `--download-model` (one-time cache fetch), and even
+>   that validates TLS against the **OS certificate store** via `truststore` — it never disables
+>   or bypasses certificate verification.
+> - Never add code that fetches models/weights/data at record time, hard-codes credentials, or
+>   weakens TLS (`verify=False`, `CERT_NONE`, custom/unpinned CAs). Keep everything auditable and
+>   local. Models come only from official sources (HuggingFace) through the download step.
+
 ## Setup & commands
 
 Run everything **from this project root** (`meeting_recorder/`), not the parent workspace —
@@ -28,6 +39,7 @@ Single package `src/meeting_recorder/`, one responsibility per module:
 | [devices.py](src/meeting_recorder/devices.py) | Mic/loopback/output discovery + interactive picker |
 | [recorder.py](src/meeting_recorder/recorder.py) | `StreamingDualRecorder` — captures both streams to disk |
 | [mixing.py](src/meeting_recorder/mixing.py) | Pure, streaming, sample-rate-aware mixdown |
+| [transcription.py](src/meeting_recorder/transcription.py) | Offline-first local STT (faster-whisper); model download + atomic transcript write |
 | [cli.py](src/meeting_recorder/cli.py) | Arg parsing, prompts, run orchestration |
 
 ## Engineering methodology — follow for EVERY change

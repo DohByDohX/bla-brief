@@ -8,7 +8,7 @@ from pathlib import Path
 
 from support import write_sine_wav
 
-from meeting_recorder import transcription
+from meeting_recorder import cli, transcription
 from meeting_recorder.cli import (
     ALL_OUTPUTS,
     _parse_args,
@@ -174,6 +174,20 @@ def test_parse_args_transcription_defaults():
 
 def test_parse_args_no_transcribe():
     assert _parse_args(["--no-transcribe"]).transcribe is False
+
+
+def test_parse_args_download_model_default_false():
+    assert _parse_args([]).download_model is False
+    assert _parse_args(["--download-model"]).download_model is True
+
+
+def test_main_download_model_exits_without_recording(monkeypatch):
+    called: dict[str, object] = {}
+    monkeypatch.setattr(cli.transcription, "download_model", lambda m: called.setdefault("m", m))
+
+    cli.main(["--download-model"])
+
+    assert called["m"] == "base.en"  # fetched the configured model, then returned
 
 
 # -- _transcribe_recording ---------------------------------------------------
