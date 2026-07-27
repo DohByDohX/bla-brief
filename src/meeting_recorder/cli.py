@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -17,6 +18,7 @@ from pathlib import Path
 from meeting_recorder import __version__, transcription, ui
 from meeting_recorder.config import (
     OUTPUT_DIR,
+    POST_TRANSCRIBE_SCRIPT,
     SAMPLE_RATE,
     STT_DEVICE,
     STT_LANGUAGE,
@@ -193,6 +195,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--keep-audio",
         action="store_true",
         help="Keep the mixed .wav after a successful transcription (default: delete it).",
+    )
+    parser.add_argument(
+        "--automation",
+        dest="run_automation",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="After a successful transcription, fire the meeting catch-up automation "
+        "(default: on). Use --no-automation to skip.",
+    )
+    parser.add_argument(
+        "--automation-script",
+        default=str(POST_TRANSCRIBE_SCRIPT),
+        help=f"PowerShell script fired after transcription (default: {POST_TRANSCRIBE_SCRIPT}).",
     )
     parser.add_argument(
         "--download-model",
@@ -403,6 +418,38 @@ def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> No
     if not args.keep_audio:
         _safe_unlink(paths.mixed_final)
         log.info("Removed mixed audio %s after transcription.", paths.mixed_final.name)
+
+    if args.run_automation:
+        _fire_automation(Path(args.automation_script))
+
+
+def _fire_automation(script: Path) -> None:
+    """Launch the meeting catch-up automation detached and return immediately.
+
+    The wrapper is self-gating and locked, so firing it unconditionally is safe.
+    It is started fully detached (its own process group, no inherited streams)
+    so the recorder can exit without waiting on the (potentially long) run; the
+    script logs its own progress to ``run.log``.
+    """
+    if not script.exists():
+        log.warning("Automation script not found (%s); skipping automation.", script)
+        return
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+            close_fds=True,
+        )
+        log.info("Fired catch-up automation (detached): %s", script.name)
+    except OSError as exc:
+        log.error("Could not launch automation (%s): %s", script, exc)
 
 
 def _finalize(
