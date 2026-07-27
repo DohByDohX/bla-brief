@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from support import FakePyAudio
 
-from meeting_recorder.devices import find_devices
+from meeting_recorder.devices import _selectable_inputs, find_devices
 
 
 def _dev(index, name, *, out=0, inp=0, loopback=False, host=1, rate=48000):
@@ -119,3 +119,35 @@ def test_explicit_loopback_without_matching_output_keeps_default():
     _, loopback, output = find_devices(pa, loopback_index=1)
     assert loopback["index"] == 1
     assert output["index"] == 0  # default output preserved
+
+
+def _multi_api_inputs():
+    """Same mic exposed under MME (host 0) and WASAPI (host 1), plus a loopback."""
+    return [
+        _dev(0, "Microphone Array", inp=2, host=0),  # MME duplicate
+        _dev(1, "Headset Mic", inp=1, host=0),  # MME duplicate
+        _dev(2, "Speakers", out=2, host=1),  # output, not an input
+        _dev(3, "Microphone Array", inp=4, host=1),  # WASAPI
+        _dev(4, "Headset Mic", inp=1, host=1),  # WASAPI
+        _dev(5, "Speakers [Loopback]", inp=2, loopback=True, host=1),
+    ]
+
+
+def test_selectable_inputs_filters_to_wasapi():
+    inputs = _selectable_inputs(_multi_api_inputs(), wasapi_api_idx=1)
+    assert [d["index"] for d in inputs] == [3, 4]  # only WASAPI mics, no dupes/loopback/output
+
+
+def test_selectable_inputs_no_wasapi_index_returns_all_inputs():
+    inputs = _selectable_inputs(_multi_api_inputs(), wasapi_api_idx=None)
+    assert [d["index"] for d in inputs] == [0, 1, 3, 4]  # every input, no loopback/output
+
+
+def test_selectable_inputs_falls_back_when_no_wasapi_inputs():
+    # WASAPI host exists (idx 1) but has no input devices -> show all inputs.
+    devices = [
+        _dev(0, "Microphone Array", inp=2, host=0),
+        _dev(1, "Speakers", out=2, host=1),
+    ]
+    inputs = _selectable_inputs(devices, wasapi_api_idx=1)
+    assert [d["index"] for d in inputs] == [0]
