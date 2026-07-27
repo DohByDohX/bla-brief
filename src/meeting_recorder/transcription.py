@@ -43,13 +43,14 @@ class TranscriptionResult:
 
 
 def _register_cuda_dll_dirs() -> None:
-    """Add the nvidia wheel ``bin`` dirs to the Windows DLL search path.
+    """Make the nvidia wheel ``bin`` dirs discoverable for CUDA DLL loading.
 
     The ``nvidia-cublas-cu12`` / ``nvidia-cudnn-cu12`` wheels install their DLLs
-    under ``site-packages/nvidia/<pkg>/bin``. CTranslate2 will not find them
-    there automatically on Windows, so we register each existing dir via
-    :func:`os.add_dll_directory`. Best-effort and idempotent: any missing
-    package or unsupported platform is simply skipped (CPU fallback still works).
+    under ``site-packages/nvidia/<pkg>/bin``. CTranslate2 does not find them
+    there automatically on Windows, and ``os.add_dll_directory`` alone is not
+    enough for how CTranslate2 resolves its CUDA dependencies -- the bin dirs
+    must also be on ``PATH``. We do both. Best-effort and idempotent: any
+    missing package or unsupported platform is simply skipped (CPU still works).
     """
     add_dll_directory = getattr(os, "add_dll_directory", None)
     if add_dll_directory is None:  # non-Windows: nothing to do
@@ -62,11 +63,35 @@ def _register_cuda_dll_dirs() -> None:
         if not spec or not spec.submodule_search_locations:
             continue
         bin_dir = Path(next(iter(spec.submodule_search_locations))) / "bin"
-        if bin_dir.is_dir():
-            try:
-                add_dll_directory(str(bin_dir))
-            except OSError:
-                log.debug("Could not register CUDA DLL dir %s", bin_dir, exc_info=True)
+        if not bin_dir.is_dir():
+            continue
+        bin_str = str(bin_dir)
+        try:
+            add_dll_directory(bin_str)
+        except OSError:
+            log.debug("Could not register CUDA DLL dir %s", bin_dir, exc_info=True)
+        # CTranslate2 resolves cuBLAS/cuDNN via PATH; prepend if not already present.
+        path = os.environ.get("PATH", "")
+        if bin_str not in path.split(os.pathsep):
+            os.environ["PATH"] = bin_str + os.pathsep + path
+
+
+def _inject_system_trust_store() -> None:
+    """Route Python's SSL through the OS certificate store, if available.
+
+    On networks that intercept TLS with a corporate root CA, ``huggingface_hub``
+    (which uses certifi's bundle) cannot verify the model download. ``truststore``
+    makes Python trust the Windows certificate store instead, where that CA
+    already lives. Best-effort: absence of ``truststore`` is silently ignored.
+    """
+    try:
+        import truststore
+    except ModuleNotFoundError:
+        return
+    try:
+        truststore.inject_into_ssl()
+    except Exception:  # noqa: BLE001 - never let trust-store setup break a run
+        log.debug("truststore injection failed", exc_info=True)
 
 
 def _candidate_devices(device: str) -> list[str]:
@@ -114,6 +139,7 @@ def transcribe_file(
     if not wav_path.exists():
         raise FileNotFoundError(f"Audio file not found: {wav_path}")
 
+    _inject_system_trust_store()
     _register_cuda_dll_dirs()
 
     last_error: Exception | None = None

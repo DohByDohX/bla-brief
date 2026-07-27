@@ -28,6 +28,7 @@ transcribe = [
     "faster-whisper~=1.0",
     "nvidia-cublas-cu12",
     "nvidia-cudnn-cu12",
+    "truststore~=0.10",
 ]
 
 [project.scripts]
@@ -72,6 +73,11 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # faster-whisper is an optional dependency and ships no type stubs.
 module = "faster_whisper.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# truststore is an optional dependency (imported lazily, best-effort).
+module = "truststore.*"
 ignore_missing_imports = true
 
 # -- Testing -----------------------------------------------------------------
