@@ -8,10 +8,13 @@ from pathlib import Path
 
 from support import write_sine_wav
 
+from meeting_recorder import cli, transcription
 from meeting_recorder.cli import (
     ALL_OUTPUTS,
+    _parse_args,
     _produce_outputs,
     _rename_recording,
+    _transcribe_recording,
     build_paths,
     parse_output_choice,
     sanitize_name,
@@ -157,3 +160,193 @@ def test_produce_outputs_discard_tracks_forces_mixed_only(tmp_path: Path):
     assert paths.mixed_final.exists()
     assert not paths.mic_path.exists()
     assert not paths.sys_path.exists()
+
+
+# -- Transcription flags -----------------------------------------------------
+
+
+def test_parse_args_transcription_defaults():
+    args = _parse_args([])
+    assert args.transcribe is True
+    assert args.stt_device == "auto"
+    assert args.keep_audio is False
+
+
+def test_parse_args_no_transcribe():
+    assert _parse_args(["--no-transcribe"]).transcribe is False
+
+
+def test_parse_args_download_model_default_false():
+    assert _parse_args([]).download_model is False
+    assert _parse_args(["--download-model"]).download_model is True
+
+
+def test_main_download_model_exits_without_recording(monkeypatch):
+    called: dict[str, object] = {}
+    monkeypatch.setattr(cli.transcription, "download_model", lambda m: called.setdefault("m", m))
+
+    cli.main(["--download-model"])
+
+    assert called["m"] == "base.en"  # fetched the configured model, then returned
+
+
+# -- _transcribe_recording ---------------------------------------------------
+
+
+def _stt_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
+    defaults = {
+        "transcript_dir": str(tmp_path / "Raw"),
+        "stt_model": "base.en",
+        "stt_device": "cpu",
+        "stt_language": "en",
+        "keep_audio": False,
+        "run_automation": False,
+        "automation_script": str(tmp_path / "process-meetings.ps1"),
+    }
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def _make_mixed(tmp_path: Path):
+    """Produce a recording layout whose mixed file exists on disk."""
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
+    _produce_outputs(paths, _args(), keep={"mixed"})
+    assert paths.mixed_final.exists()
+    return paths
+
+
+def test_transcribe_writes_md_and_deletes_wav(tmp_path: Path, monkeypatch):
+    paths = _make_mixed(tmp_path)
+    monkeypatch.setattr(
+        transcription,
+        "transcribe_file",
+        lambda *a, **k: transcription.TranscriptionResult("Hello team.", "en", 1.0, "cpu"),
+    )
+
+    _transcribe_recording(paths, _stt_args(tmp_path))
+
+    md = Path(tmp_path / "Raw" / f"{paths.mixed_final.stem}.md")
+    assert md.read_text(encoding="utf-8") == "Hello team.\n"
+    assert not paths.mixed_final.exists()  # wav removed after success
+
+
+def test_transcribe_keep_audio_retains_wav(tmp_path: Path, monkeypatch):
+    paths = _make_mixed(tmp_path)
+    monkeypatch.setattr(
+        transcription,
+        "transcribe_file",
+        lambda *a, **k: transcription.TranscriptionResult("kept.", "en", 1.0, "cpu"),
+    )
+
+    _transcribe_recording(paths, _stt_args(tmp_path, keep_audio=True))
+
+    assert paths.mixed_final.exists()  # audio preserved
+
+
+def test_transcribe_failure_keeps_wav_and_writes_nothing(tmp_path: Path, monkeypatch):
+    paths = _make_mixed(tmp_path)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("engine down")
+
+    monkeypatch.setattr(transcription, "transcribe_file", boom)
+
+    _transcribe_recording(paths, _stt_args(tmp_path))
+
+    assert paths.mixed_final.exists()  # never lose audio on failure
+    assert not (tmp_path / "Raw").exists() or list((tmp_path / "Raw").glob("*.md")) == []
+
+
+def test_transcribe_empty_text_keeps_wav_and_writes_nothing(tmp_path: Path, monkeypatch):
+    paths = _make_mixed(tmp_path)
+    monkeypatch.setattr(
+        transcription,
+        "transcribe_file",
+        lambda *a, **k: transcription.TranscriptionResult("   ", "en", 0.0, "cpu"),
+    )
+
+    _transcribe_recording(paths, _stt_args(tmp_path))
+
+    assert paths.mixed_final.exists()
+    assert not (tmp_path / "Raw").exists() or list((tmp_path / "Raw").glob("*.md")) == []
+
+
+def test_transcribe_no_mixed_file_is_noop(tmp_path: Path, monkeypatch):
+    paths = build_paths("demo", tmp_path / "Recordings", timestamp="2026-07-09_1204")
+    called = False
+
+    def spy(*_a, **_k):
+        nonlocal called
+        called = True
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(transcription, "transcribe_file", spy)
+
+    _transcribe_recording(paths, _stt_args(tmp_path))
+
+    assert called is False
+
+
+# -- automation trigger ------------------------------------------------------
+
+
+def test_parse_args_run_automation_default_on():
+    assert _parse_args([]).run_automation is True
+    assert _parse_args(["--no-automation"]).run_automation is False
+
+
+def _ok_transcribe(monkeypatch):
+    monkeypatch.setattr(
+        transcription,
+        "transcribe_file",
+        lambda *a, **k: transcription.TranscriptionResult("Hello.", "en", 1.0, "cpu"),
+    )
+
+
+def test_transcribe_fires_automation_on_success(tmp_path: Path, monkeypatch):
+    paths = _make_mixed(tmp_path)
+    _ok_transcribe(monkeypatch)
+    script = tmp_path / "process-meetings.ps1"
+    script.write_text("# stub", encoding="utf-8")
+    launched: list[list[str]] = []
+    monkeypatch.setattr(cli.subprocess, "Popen", lambda cmd, **k: launched.append(cmd))
+
+    _transcribe_recording(paths, _stt_args(tmp_path, run_automation=True))
+
+    assert len(launched) == 1
+    assert str(script) in launched[0]  # the script path is passed to powershell
+
+
+def test_transcribe_no_automation_does_not_fire(tmp_path: Path, monkeypatch):
+    paths = _make_mixed(tmp_path)
+    _ok_transcribe(monkeypatch)
+    (tmp_path / "process-meetings.ps1").write_text("# stub", encoding="utf-8")
+    launched: list[object] = []
+    monkeypatch.setattr(cli.subprocess, "Popen", lambda cmd, **k: launched.append(cmd))
+
+    _transcribe_recording(paths, _stt_args(tmp_path, run_automation=False))
+
+    assert launched == []
+
+
+def test_transcribe_failure_does_not_fire_automation(tmp_path: Path, monkeypatch):
+    paths = _make_mixed(tmp_path)
+    monkeypatch.setattr(
+        transcription, "transcribe_file", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+    )
+    (tmp_path / "process-meetings.ps1").write_text("# stub", encoding="utf-8")
+    launched: list[object] = []
+    monkeypatch.setattr(cli.subprocess, "Popen", lambda cmd, **k: launched.append(cmd))
+
+    _transcribe_recording(paths, _stt_args(tmp_path, run_automation=True))
+
+    assert launched == []  # no transcript -> no automation
+
+
+def test_fire_automation_missing_script_skips(tmp_path: Path, monkeypatch):
+    launched: list[object] = []
+    monkeypatch.setattr(cli.subprocess, "Popen", lambda cmd, **k: launched.append(cmd))
+
+    cli._fire_automation(tmp_path / "does-not-exist.ps1")
+
+    assert launched == []

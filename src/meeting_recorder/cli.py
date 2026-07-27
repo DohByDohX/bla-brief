@@ -8,14 +8,23 @@ import logging
 import os
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from meeting_recorder import __version__, ui
-from meeting_recorder.config import OUTPUT_DIR, SAMPLE_RATE
+from meeting_recorder import __version__, transcription, ui
+from meeting_recorder.config import (
+    OUTPUT_DIR,
+    POST_TRANSCRIBE_SCRIPT,
+    SAMPLE_RATE,
+    STT_DEVICE,
+    STT_LANGUAGE,
+    STT_MODEL,
+    TRANSCRIPT_DIR,
+)
 from meeting_recorder.devices import list_devices, select_devices
 from meeting_recorder.logging_setup import configure_logging
 from meeting_recorder.mixing import create_mixed_file
@@ -155,6 +164,57 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Prompt for input/system devices before recording, and for a name and "
         "which outputs to keep after recording.",
+    )
+    parser.add_argument(
+        "--transcribe",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Transcribe the mixed file after recording (default: on). Use --no-transcribe "
+        "to skip.",
+    )
+    parser.add_argument(
+        "--stt-model", default=STT_MODEL, help=f"Whisper model to use (default: {STT_MODEL})"
+    )
+    parser.add_argument(
+        "--stt-language",
+        default=STT_LANGUAGE,
+        help=f"Transcription language hint (default: {STT_LANGUAGE})",
+    )
+    parser.add_argument(
+        "--stt-device",
+        default=STT_DEVICE,
+        choices=("auto", "cuda", "cpu"),
+        help=f"Transcription backend (default: {STT_DEVICE}; 'auto' tries GPU then CPU).",
+    )
+    parser.add_argument(
+        "--transcript-dir",
+        default=str(TRANSCRIPT_DIR),
+        help=f"Where to write the .md transcript (default: {TRANSCRIPT_DIR})",
+    )
+    parser.add_argument(
+        "--keep-audio",
+        action="store_true",
+        help="Keep the mixed .wav after a successful transcription (default: delete it).",
+    )
+    parser.add_argument(
+        "--automation",
+        dest="run_automation",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="After a successful transcription, fire the meeting catch-up automation "
+        "(default: on). Use --no-automation to skip.",
+    )
+    parser.add_argument(
+        "--automation-script",
+        default=str(POST_TRANSCRIBE_SCRIPT),
+        help=f"PowerShell script fired after transcription (default: {POST_TRANSCRIBE_SCRIPT}).",
+    )
+    parser.add_argument(
+        "--download-model",
+        action="store_true",
+        help="Fetch the transcription model into the local cache and exit (the only "
+        "step that goes online). Run once on an approved network; recordings then "
+        "transcribe fully offline.",
     )
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     return parser.parse_args(argv)
@@ -324,6 +384,77 @@ def _report_outputs(
     ui.output_summary(entries, published=published, tracks_dir=tracks_dir)
 
 
+def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> None:
+    """Transcribe the mixed file, write the .md, and remove the wav on success.
+
+    Best-effort: any failure is logged and the audio is left in place so a
+    recording is never lost to a transcription problem. Does nothing when there
+    is no mixed file (e.g. the user chose not to keep it).
+    """
+    if not paths.mixed_final.exists():
+        log.warning("No mixed file to transcribe; skipping transcription.")
+        return
+
+    dest_md = Path(args.transcript_dir) / f"{paths.mixed_final.stem}.md"
+    try:
+        result = transcription.transcribe_file(
+            paths.mixed_final,
+            model=args.stt_model,
+            device=args.stt_device,
+            language=args.stt_language,
+        )
+    except Exception as exc:  # noqa: BLE001 - never lose audio to a transcription error
+        log.error("Transcription failed (%s); keeping the audio file.", exc)
+        return
+
+    if not result.text.strip():
+        log.warning("Transcription produced no text; keeping the audio, not writing a transcript.")
+        return
+
+    md_path = transcription.write_transcript(result.text, dest_md)
+    log.info("Transcript written to %s (%s).", md_path, result.device)
+    print(f"\n  Transcript: {md_path}")
+
+    if not args.keep_audio:
+        _safe_unlink(paths.mixed_final)
+        log.info("Removed mixed audio %s after transcription.", paths.mixed_final.name)
+
+    if args.run_automation:
+        _fire_automation(Path(args.automation_script))
+
+
+def _fire_automation(script: Path) -> None:
+    """Launch the meeting catch-up automation detached and return immediately.
+
+    The wrapper is self-gating and locked, so firing it unconditionally is safe.
+    It is started fully detached (its own process group, no inherited streams)
+    so the recorder can exit without waiting on the (potentially long) run; the
+    script logs its own progress to ``run.log``.
+    """
+    if not script.exists():
+        log.warning("Automation script not found (%s); skipping automation.", script)
+        return
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
+    creationflags = 0
+    if os.name == "nt":
+        # No console window + its own process group (so Ctrl+C to the recorder
+        # does not propagate). DETACHED_PROCESS is intentionally NOT used: it
+        # prevents PowerShell from executing under these conditions on Windows.
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    try:
+        subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+            close_fds=True,
+        )
+        log.info("Fired catch-up automation (detached): %s", script.name)
+    except OSError as exc:
+        log.error("Could not launch automation (%s): %s", script, exc)
+
+
 def _finalize(
     recorder: StreamingDualRecorder,
     paths: RecordingPaths,
@@ -359,6 +490,9 @@ def _finalize(
 
     _produce_outputs(paths, args, keep)
 
+    if args.transcribe:
+        _transcribe_recording(paths, args)
+
     print("\n  Done!\n")
 
 
@@ -368,6 +502,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.list_devices:
         list_devices()
+        return
+
+    if args.download_model:
+        # The single sanctioned online step; populates the cache, then exits.
+        transcription.download_model(args.stt_model)
+        print(f"\n  Model '{args.stt_model}' cached. Recordings now transcribe offline.\n")
         return
 
     _print_banner()

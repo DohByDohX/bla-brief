@@ -21,6 +21,15 @@ dev = [
     "pytest~=8.3",
     "pytest-cov~=5.0",
 ]
+# Local speech-to-text. The nvidia-* wheels supply the CUDA cuBLAS/cuDNN
+# libraries CTranslate2 needs for GPU; they are harmless on CPU-only runs
+# (the code falls back to CPU when the GPU backend cannot load).
+transcribe = [
+    "faster-whisper~=1.0",
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
+    "truststore~=0.10",
+]
 
 [project.scripts]
 meeting-recorder = "meeting_recorder.cli:main"
@@ -59,6 +68,16 @@ no_implicit_optional = true
 [[tool.mypy.overrides]]
 # PyAudioWPatch ships no type information.
 module = "pyaudiowpatch.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# faster-whisper is an optional dependency and ships no type stubs.
+module = "faster_whisper.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# truststore is an optional dependency (imported lazily, best-effort).
+module = "truststore.*"
 ignore_missing_imports = true
 
 # -- Testing -----------------------------------------------------------------
