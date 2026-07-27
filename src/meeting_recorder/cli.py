@@ -437,7 +437,10 @@ def _fire_automation(script: Path) -> None:
     cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
     creationflags = 0
     if os.name == "nt":
-        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        # No console window + its own process group (so Ctrl+C to the recorder
+        # does not propagate). DETACHED_PROCESS is intentionally NOT used: it
+        # prevents PowerShell from executing under these conditions on Windows.
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     try:
         subprocess.Popen(
             cmd,
