@@ -54,32 +54,9 @@ def sanitize_name(name: str) -> str:
     return re.sub(r"[^\w.-]", "_", name).strip("._") or "recording"
 
 
-#: The three producible outputs, used as the interactive keep-set vocabulary.
+#: The three producible outputs. ``_produce_outputs`` accepts any subset;
+#: recordings now always keep only the mixed file.
 ALL_OUTPUTS = frozenset({"mixed", "mic", "system"})
-
-_OUTPUT_ALIASES = {
-    "m": "mixed",
-    "mix": "mixed",
-    "mixed": "mixed",
-    "v": "mic",
-    "voice": "mic",
-    "mic": "mic",
-    "s": "system",
-    "sys": "system",
-    "system": "system",
-}
-
-
-def parse_output_choice(raw: str) -> set[str]:
-    """Parse an interactive output selection into a keep-set.
-
-    Accepts comma/space separated tokens using either letters ([m]ixed,
-    [v]oice, [s]ystem) or full words. Empty or fully-unrecognized input keeps
-    all three outputs (the safe default).
-    """
-    tokens = re.split(r"[,\s]+", raw.strip().lower())
-    chosen = {_OUTPUT_ALIASES[t] for t in tokens if t in _OUTPUT_ALIASES}
-    return chosen or set(ALL_OUTPUTS)
 
 
 def build_paths(
@@ -162,8 +139,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--interactive",
         "-i",
         action="store_true",
-        help="Prompt for input/system devices before recording, and for a name and "
-        "which outputs to keep after recording.",
+        help="Prompt for input/system devices before recording, and for a name after recording.",
     )
     parser.add_argument(
         "--transcribe",
@@ -482,13 +458,9 @@ def _finalize(
                 paths, name, Path(args.output_dir), args.tracks_dir, timestamp
             )
 
-    # Feature: choose which outputs to keep.
-    keep = set(ALL_OUTPUTS)
-    if interactive:
-        keep = parse_output_choice(ui.prompt("keep [m]ixed [v]oice [s]ystem", default="all"))
-        log.info("Keeping: %s", ", ".join(sorted(keep)))
-
-    _produce_outputs(paths, args, keep)
+    # Only the mixed file is kept; the raw mic/system tracks are pruned after
+    # mixdown (the empty-track fallback in _produce_outputs still applies).
+    _produce_outputs(paths, args, keep={"mixed"})
 
     if args.transcribe:
         _transcribe_recording(paths, args)

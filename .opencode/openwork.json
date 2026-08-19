@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "workspace": {
+    "name": "meeting_recorder",
+    "createdAt": 1784048564760,
+    "preset": "starter"
+  },
+  "authorizedRoots": [
+    "C:\\Users\\pchavan\\Nova\\meeting_recorder"
+  ],
+  "reload": null
+}
