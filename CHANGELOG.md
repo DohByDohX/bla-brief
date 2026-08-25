@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ENTER stop. The live panel shows the cap (`auto-stop 02:00:00`).
 
 ### Changed
+- Default transcription model is now `small.en` (was `base.en`). Override
+  per run with `--stt-model`. Fetch it once with `--download-model`.
 - Recordings now always keep only the mixed file. The post-recording
   `keep [m]ixed [v]oice [s]ystem` prompt is gone, and mixed-only is the default
   for interactive and non-interactive runs alike. The raw mic/system tracks are

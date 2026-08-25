@@ -148,7 +148,7 @@ def _load_whisper_model(model_size: str, device: str, compute_type: str) -> Any:
 def transcribe_file(
     wav_path: Path,
     *,
-    model: str = "base.en",
+    model: str = "small.en",
     device: str = "auto",
     language: str = "en",
 ) -> TranscriptionResult:
@@ -193,7 +193,7 @@ def transcribe_file(
     raise RuntimeError(f"No transcription backend could be loaded (last error: {last_error})")
 
 
-def download_model(model: str = "base.en") -> None:
+def download_model(model: str = "small.en") -> None:
     """Fetch ``model`` into the local cache -- the only online operation.
 
     This is the sanctioned one-time step to populate the HuggingFace cache so

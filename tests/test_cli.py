@@ -161,6 +161,11 @@ def test_parse_args_download_model_default_false():
     assert _parse_args(["--download-model"]).download_model is True
 
 
+def test_parse_args_stt_model_defaults_to_small_en():
+    assert _parse_args([]).stt_model == "small.en"
+    assert _parse_args(["--stt-model", "medium.en"]).stt_model == "medium.en"
+
+
 # -- Max duration (forgotten-to-stop safety net) -----------------------------
 
 
@@ -195,7 +200,7 @@ def test_main_download_model_exits_without_recording(monkeypatch):
 
     cli.main(["--download-model"])
 
-    assert called["m"] == "base.en"  # fetched the configured model, then returned
+    assert called["m"] == "small.en"  # fetched the configured model, then returned
 
 
 # -- _transcribe_recording ---------------------------------------------------
