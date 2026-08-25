@@ -25,3 +25,11 @@ Recordings/
 
 # Throwaway UI design mockups (local only)
 ui-mockup*.html
+
+# OpenCode / Grok workspace-local artifacts (machine-specific; recreated on open)
+.opencode/openwork.json
+.opencode/openwork/
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/bun.lock
