@@ -16,7 +16,6 @@ from meeting_recorder.cli import (
     _rename_recording,
     _transcribe_recording,
     build_paths,
-    parse_output_choice,
     sanitize_name,
 )
 
@@ -65,27 +64,6 @@ def test_build_paths_custom_tracks_dir():
     paths = build_paths("demo", out, tracks_dir=custom, timestamp="2026-07-07_0900")
     assert paths.work_dir == custom
     assert paths.mic_path.parent == custom
-
-
-def test_parse_output_choice_empty_keeps_all():
-    assert parse_output_choice("") == set(ALL_OUTPUTS)
-    assert parse_output_choice("   ") == set(ALL_OUTPUTS)
-
-
-def test_parse_output_choice_letters():
-    assert parse_output_choice("m") == {"mixed"}
-    assert parse_output_choice("v") == {"mic"}
-    assert parse_output_choice("s") == {"system"}
-
-
-def test_parse_output_choice_multi_and_words():
-    assert parse_output_choice("m, v") == {"mixed", "mic"}
-    assert parse_output_choice("voice system") == {"mic", "system"}
-    assert parse_output_choice("mixed,mic,system") == set(ALL_OUTPUTS)
-
-
-def test_parse_output_choice_unknown_falls_back_to_all():
-    assert parse_output_choice("xyz") == set(ALL_OUTPUTS)
 
 
 def test_rename_recording_renames_tracks_and_returns_named_paths(tmp_path: Path):
