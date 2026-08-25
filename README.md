@@ -41,10 +41,14 @@ python -m meeting_recorder -l                  # list audio devices
 python -m meeting_recorder --mic 15            # force a specific mic
 python -m meeting_recorder --system 17         # force a specific system/loopback device
 python -m meeting_recorder --discard-tracks    # keep only the mixed file
+python -m meeting_recorder --max-duration 90   # auto-stop after 90 minutes
+python -m meeting_recorder --max-duration 0    # no time limit
 python -m meeting_recorder --debug             # verbose logging
 ```
 
-Press **ENTER** (or **Ctrl+C**) to stop. Output defaults to
+Press **ENTER** (or **Ctrl+C**) to stop. Recordings auto-stop after **2 hours**
+(a forgotten-to-stop safety net); override with `--max-duration MINUTES` or
+disable with `--max-duration 0`. Output defaults to
 `%LOCALAPPDATA%\audacity\Recordings`. Or double-click `Record Meeting.bat`
 (which runs in `-i` interactive mode: it prompts for the mic/system devices
 before recording, then for a meeting name afterward). Recordings always keep

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Default 2-hour auto-stop so a forgotten recording cannot run overnight.
+  Override per run with `--max-duration MINUTES`; `--max-duration 0` disables
+  the limit. A timed-out recording still mixdown + transcribes like a normal
+  ENTER stop. The live panel shows the cap (`auto-stop 02:00:00`).
+
 ### Changed
 - Recordings now always keep only the mixed file. The post-recording
   `keep [m]ixed [v]oice [s]ystem` prompt is gone, and mixed-only is the default

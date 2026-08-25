@@ -187,6 +187,18 @@ def test_recording_panel_render_contains_timer(monkeypatch):
     assert "REC" in out
     assert "00:12:34" in out
     assert "Headset" in out
+    assert "press ENTER to stop" in out
+    assert "auto-stop" not in out
+
+
+def test_recording_panel_shows_auto_stop_label(monkeypatch):
+    con, sio = _console(terminal=True)
+    monkeypatch.setattr(ui, "console", con)
+    view = ui.RecordingView("Headset → Speakers", auto_stop_label="02:00:00")
+    con.print(view._render("00:12:34", 10.0, 20.0))
+    out = sio.getvalue()
+    assert "auto-stop 02:00:00" in out
+    assert "press ENTER to stop" in out
 
 
 def test_recording_view_non_tty_prints_hint(monkeypatch, capsys):
@@ -194,7 +206,19 @@ def test_recording_view_non_tty_prints_hint(monkeypatch, capsys):
     monkeypatch.setattr(ui, "console", con)
     with ui.RecordingView("mic → sys") as view:
         view.update("00:00:01", 1.0, 2.0)  # no-op off-TTY, must not raise
-    assert "RECORDING" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "RECORDING" in out
+    assert "Auto-stop" not in out
+
+
+def test_recording_view_non_tty_prints_auto_stop_hint(monkeypatch, capsys):
+    con, _ = _console(terminal=False)
+    monkeypatch.setattr(ui, "console", con)
+    with ui.RecordingView("mic → sys", auto_stop_label="02:00:00"):
+        pass
+    out = capsys.readouterr().out
+    assert "RECORDING" in out
+    assert "Auto-stop at 02:00:00" in out
 
 
 def test_recording_view_tty_context_does_not_raise(monkeypatch):

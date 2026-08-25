@@ -18,6 +18,10 @@ NORM_TARGET: float = 0.95  # peak the mixed file is normalized to (headroom belo
 ALIGN_THRESHOLD_S: float = 0.05  # ignore sub-50ms start offsets when aligning tracks
 MIX_CHUNK_FRAMES: int = SAMPLE_RATE * 10  # streaming mix window (bounds memory)
 
+# Forgotten-to-stop safety net. Auto-stops the recording after this many
+# minutes so a laptop left running cannot fill the disk overnight. 0 = unlimited.
+MAX_DURATION_MIN: int = 120
+
 # -- Local transcription (faster-whisper) ------------------------------------
 # Where finished transcripts (.md) are written. This is also the folder the
 # downstream meeting catch-up automation watches.

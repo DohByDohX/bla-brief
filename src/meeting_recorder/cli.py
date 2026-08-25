@@ -17,6 +17,7 @@ from pathlib import Path
 
 from meeting_recorder import __version__, transcription, ui
 from meeting_recorder.config import (
+    MAX_DURATION_MIN,
     OUTPUT_DIR,
     POST_TRANSCRIBE_SCRIPT,
     SAMPLE_RATE,
@@ -42,6 +43,25 @@ class RecordingPaths:
     sys_path: Path
     mixed_tmp: Path  # in-progress ".part" file (ignored by *.wav watchers)
     mixed_final: Path  # atomically published final file in the watch folder
+
+
+def _non_negative_int(value: str) -> int:
+    """Parse an int >= 0 so ``--max-duration -1`` fails at the input boundary."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be >= 0 (0 disables the limit)")
+    return parsed
+
+
+def _limit_reached(elapsed_s: float, max_duration_min: int) -> bool:
+    """True once the recording has hit the forgotten-to-stop auto-stop cap.
+
+    ``max_duration_min <= 0`` means unlimited for this run.
+    """
+    return max_duration_min > 0 and elapsed_s >= max_duration_min * 60
 
 
 def sanitize_name(name: str) -> str:
@@ -192,6 +212,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "step that goes online). Run once on an approved network; recordings then "
         "transcribe fully offline.",
     )
+    parser.add_argument(
+        "--max-duration",
+        type=_non_negative_int,
+        default=MAX_DURATION_MIN,
+        metavar="MINUTES",
+        help=f"Auto-stop after MINUTES (default: {MAX_DURATION_MIN}). 0 disables the limit.",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     return parser.parse_args(argv)
 
@@ -233,9 +260,14 @@ def _device_line(recorder: StreamingDualRecorder) -> str:
     return f"{mic} {mic_k}k → {system} {sys_k}k"
 
 
-def _run_recording_ui(recorder: StreamingDualRecorder, paths: RecordingPaths) -> None:
-    """Drive the live recording view + ENTER/Ctrl+C stop loop while recording."""
+def _run_recording_ui(
+    recorder: StreamingDualRecorder,
+    paths: RecordingPaths,
+    max_duration_min: int = 0,
+) -> None:
+    """Drive the live recording view + ENTER/Ctrl+C/time-limit stop loop."""
     start_time = time.time()
+    auto_stop_label = _fmt_elapsed(max_duration_min * 60) if max_duration_min > 0 else None
 
     def wait_for_enter() -> None:
         # ENTER and the SIGINT handler both request stop, so the poll loop
@@ -249,10 +281,15 @@ def _run_recording_ui(recorder: StreamingDualRecorder, paths: RecordingPaths) ->
     threading.Thread(target=wait_for_enter, daemon=True).start()
 
     tty = ui.supports_ui()
-    with ui.RecordingView(_device_line(recorder)) as view:
+    with ui.RecordingView(_device_line(recorder), auto_stop_label=auto_stop_label) as view:
         try:
             while recorder.is_recording:
                 elapsed = time.time() - start_time
+                if _limit_reached(elapsed, max_duration_min):
+                    log.info("Reached max duration (%s min); stopping.", max_duration_min)
+                    print("\n  Max duration reached; stopping...")
+                    recorder.request_stop()
+                    break
                 mic_mb, sys_mb = _track_sizes(paths)
                 if tty:
                     view.update(_fmt_elapsed(elapsed), mic_mb, sys_mb)
@@ -521,7 +558,13 @@ def main(argv: list[str] | None = None) -> None:
 
     signal.signal(signal.SIGINT, handle_signal)
 
-    _run_recording_ui(recorder, paths)
+    if args.max_duration > 0:
+        log.info(
+            "Auto-stop after %s min (pass --max-duration 0 to disable).",
+            args.max_duration,
+        )
+
+    _run_recording_ui(recorder, paths, args.max_duration)
     _finalize(recorder, paths, args, timestamp, args.interactive)
 
 

@@ -6,11 +6,13 @@ import argparse
 import re
 from pathlib import Path
 
+import pytest
 from support import write_sine_wav
 
 from meeting_recorder import cli, transcription
 from meeting_recorder.cli import (
     ALL_OUTPUTS,
+    _limit_reached,
     _parse_args,
     _produce_outputs,
     _rename_recording,
@@ -157,6 +159,34 @@ def test_parse_args_no_transcribe():
 def test_parse_args_download_model_default_false():
     assert _parse_args([]).download_model is False
     assert _parse_args(["--download-model"]).download_model is True
+
+
+# -- Max duration (forgotten-to-stop safety net) -----------------------------
+
+
+def test_parse_args_max_duration_defaults_to_two_hours():
+    assert _parse_args([]).max_duration == 120
+
+
+def test_parse_args_max_duration_override_and_disable():
+    assert _parse_args(["--max-duration", "90"]).max_duration == 90
+    assert _parse_args(["--max-duration", "0"]).max_duration == 0
+
+
+def test_parse_args_max_duration_rejects_negative():
+    with pytest.raises(SystemExit):
+        _parse_args(["--max-duration", "-1"])
+
+
+def test_limit_reached_disabled_when_zero():
+    assert _limit_reached(10_000, 0) is False
+
+
+def test_limit_reached_at_boundary():
+    # 120 min = 7200s. Just under does not fire; exact and over do.
+    assert _limit_reached(7199.9, 120) is False
+    assert _limit_reached(7200.0, 120) is True
+    assert _limit_reached(7200.1, 120) is True
 
 
 def test_main_download_model_exits_without_recording(monkeypatch):
