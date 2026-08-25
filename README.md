@@ -47,7 +47,8 @@ python -m meeting_recorder --debug             # verbose logging
 Press **ENTER** (or **Ctrl+C**) to stop. Output defaults to
 `%LOCALAPPDATA%\audacity\Recordings`. Or double-click `Record Meeting.bat`
 (which runs in `-i` interactive mode: it prompts for the mic/system devices
-before recording, then for a meeting name and which outputs to keep afterward).
+before recording, then for a meeting name afterward). Recordings always keep
+only the mixed file; the raw mic/system tracks are pruned after mixdown.
 
 ## Transcription (optional)
 
