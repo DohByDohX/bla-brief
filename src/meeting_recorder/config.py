@@ -28,7 +28,7 @@ MAX_DURATION_MIN: int = 120
 TRANSCRIPT_DIR: Path = (
     Path.home() / "OneDrive - Tesla" / "Tesla.pruthviraj" / "Work" / "Ops" / "Meeting Notes" / "Raw"
 )
-STT_MODEL: str = "small.en"  # Whisper model size (small.en = accuracy/speed balance, English-only)
+STT_MODEL: str = "medium.en"  # Whisper model size (medium.en = higher accuracy, English-only)
 STT_DEVICE: str = "auto"  # "auto" (GPU-first, CPU fallback), "cuda", or "cpu"
 STT_LANGUAGE: str = "en"  # source language hint passed to the model
 # PowerShell wrapper fired (detached) after a successful transcription. It is

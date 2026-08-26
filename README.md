@@ -76,7 +76,7 @@ falling back to CPU otherwise.
 
 ```powershell
 python -m meeting_recorder --no-transcribe       # record only, skip transcription
-python -m meeting_recorder --stt-model medium.en # override the default (small.en)
+python -m meeting_recorder --stt-model small.en  # override the default (medium.en)
 python -m meeting_recorder --stt-device cpu     # force CPU (default: auto)
 python -m meeting_recorder --keep-audio         # keep the mixed .wav after transcribing
 python -m meeting_recorder --no-automation      # transcribe but don't fire the catch-up script
