@@ -71,11 +71,13 @@ def _load_embedder() -> Any:
     meeting's worth of audio on CPU costs no VRAM.
     """
     from speechbrain.inference.speaker import EncoderClassifier
+    from speechbrain.utils.fetching import LocalStrategy
 
     return EncoderClassifier.from_hparams(
         source=DIARIZE_MODEL,
         savedir=str(DIARIZE_CACHE_DIR),
         run_opts={"device": "cpu"},
+        local_strategy=LocalStrategy.COPY,  # avoid symlinks (need elevation on Windows)
     )
 
 
