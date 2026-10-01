@@ -102,7 +102,7 @@ def _transcribe(wav_path: Path) -> list[dict]:
     from meeting_recorder.transcription import _register_cuda_dll_dirs
 
     _register_cuda_dll_dirs()  # GPU only; no CPU fallback for this spike
-    model = WhisperModel("base.en", device="cuda", compute_type="int8_float16")
+    model = WhisperModel("small.en", device="cuda", compute_type="int8_float16")
     segments, _info = model.transcribe(str(wav_path), language="en", word_timestamps=True)
     words = []
     for seg in segments:
@@ -156,7 +156,7 @@ def _cached_vad_embeddings_and_words(
     print("Embedding segments...")
     embeddings = _embed_segments(embedder, audio, segments)
 
-    print("Transcribing (Whisper base.en, GPU)...")
+    print("Transcribing (Whisper small.en, GPU)...")
     words = _transcribe(wav_path)
 
     with cache_path.open("wb") as f:
