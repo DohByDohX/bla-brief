@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from support import write_sine_wav
 
-from meeting_recorder import cli, transcription
+from meeting_recorder import cli, diarization, transcription
 from meeting_recorder.cli import (
     ALL_OUTPUTS,
     _limit_reached,
@@ -231,8 +231,8 @@ def _make_mixed(tmp_path: Path):
 def test_transcribe_writes_md_and_deletes_wav(tmp_path: Path, monkeypatch):
     paths = _make_mixed(tmp_path)
     monkeypatch.setattr(
-        transcription,
-        "transcribe_file",
+        diarization,
+        "transcribe_with_speakers",
         lambda *a, **k: transcription.TranscriptionResult("Hello team.", "en", 1.0, "cpu"),
     )
 
@@ -246,8 +246,8 @@ def test_transcribe_writes_md_and_deletes_wav(tmp_path: Path, monkeypatch):
 def test_transcribe_keep_audio_retains_wav(tmp_path: Path, monkeypatch):
     paths = _make_mixed(tmp_path)
     monkeypatch.setattr(
-        transcription,
-        "transcribe_file",
+        diarization,
+        "transcribe_with_speakers",
         lambda *a, **k: transcription.TranscriptionResult("kept.", "en", 1.0, "cpu"),
     )
 
@@ -262,7 +262,7 @@ def test_transcribe_failure_keeps_wav_and_writes_nothing(tmp_path: Path, monkeyp
     def boom(*_a, **_k):
         raise RuntimeError("engine down")
 
-    monkeypatch.setattr(transcription, "transcribe_file", boom)
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", boom)
 
     _transcribe_recording(paths, _stt_args(tmp_path))
 
@@ -273,8 +273,8 @@ def test_transcribe_failure_keeps_wav_and_writes_nothing(tmp_path: Path, monkeyp
 def test_transcribe_empty_text_keeps_wav_and_writes_nothing(tmp_path: Path, monkeypatch):
     paths = _make_mixed(tmp_path)
     monkeypatch.setattr(
-        transcription,
-        "transcribe_file",
+        diarization,
+        "transcribe_with_speakers",
         lambda *a, **k: transcription.TranscriptionResult("   ", "en", 0.0, "cpu"),
     )
 
@@ -293,7 +293,7 @@ def test_transcribe_no_mixed_file_is_noop(tmp_path: Path, monkeypatch):
         called = True
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(transcription, "transcribe_file", spy)
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", spy)
 
     _transcribe_recording(paths, _stt_args(tmp_path))
 
@@ -310,8 +310,8 @@ def test_parse_args_run_automation_default_on():
 
 def _ok_transcribe(monkeypatch):
     monkeypatch.setattr(
-        transcription,
-        "transcribe_file",
+        diarization,
+        "transcribe_with_speakers",
         lambda *a, **k: transcription.TranscriptionResult("Hello.", "en", 1.0, "cpu"),
     )
 
@@ -345,7 +345,9 @@ def test_transcribe_no_automation_does_not_fire(tmp_path: Path, monkeypatch):
 def test_transcribe_failure_does_not_fire_automation(tmp_path: Path, monkeypatch):
     paths = _make_mixed(tmp_path)
     monkeypatch.setattr(
-        transcription, "transcribe_file", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+        diarization,
+        "transcribe_with_speakers",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
     )
     (tmp_path / "process-meetings.ps1").write_text("# stub", encoding="utf-8")
     launched: list[object] = []

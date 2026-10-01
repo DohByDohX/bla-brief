@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Override per run with `--max-duration MINUTES`; `--max-duration 0` disables
   the limit. A timed-out recording still mixdown + transcribes like a normal
   ENTER stop. The live panel shows the cap (`auto-stop 02:00:00`).
+- Transcripts are now speaker-labeled (`Speaker 0:`, `Speaker 1:`, ...).
+  Diarization runs unconditionally after every recording: VAD segments the
+  audio, an ungated SpeechBrain ECAPA model embeds each segment (CPU, no
+  extra VRAM -- Whisper keeps the GPU), and the segments are clustered into
+  speakers before merging with Whisper's word timestamps. Speaker labels are
+  cluster IDs, not real names. Fetch the embedding model once with
+  `--download-model` (same offline-first, one-time-online pattern as the
+  Whisper model).
 
 ### Changed
 - Default transcription model is now `small.en` (was `base.en`). Override

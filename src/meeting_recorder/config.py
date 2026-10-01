@@ -43,3 +43,16 @@ POST_TRANSCRIBE_SCRIPT: Path = (
     / "_automation"
     / "process-meetings.ps1"
 )
+
+# -- Speaker diarization (SpeechBrain ECAPA) ----------------------------------
+# Ungated voice-embedding model used to tell speakers apart (clustered into
+# "Speaker N" labels, not real names). Cached under the user's profile so it
+# resolves the same way regardless of the recorder's working directory.
+DIARIZE_MODEL: str = "speechbrain/spkrec-ecapa-voxceleb"
+DIARIZE_CACHE_DIR: Path = Path.home() / ".cache" / "meeting_recorder" / "speaker_embedder"
+# Agglomerative clustering distance threshold (euclidean, on L2-normalized
+# embeddings). Lower = more speakers (over-splits); higher = fewer speakers
+# (over-merges). Calibrated against a hand-counted recording; validate further
+# before trusting it across very different meeting sizes/styles.
+DIARIZE_CLUSTER_THRESHOLD: float = 1.3
+DIARIZE_MIN_SEGMENT_S: float = 0.3  # drop VAD slivers too short to embed meaningfully

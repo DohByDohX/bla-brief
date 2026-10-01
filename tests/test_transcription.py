@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from meeting_recorder import transcription
+from meeting_recorder import diarization, transcription
 from meeting_recorder.transcription import (
     TranscriptionResult,
     _candidate_devices,
@@ -182,7 +182,7 @@ def test_transcribe_runs_offline_and_never_online(tmp_path: Path, monkeypatch):
 
 
 def test_download_model_goes_online_and_loads_on_cpu(monkeypatch):
-    calls: dict[str, object] = {"trust": 0}
+    calls: dict[str, object] = {"trust": 0, "embedder": 0}
     monkeypatch.setattr(
         transcription, "_inject_system_trust_store", lambda: calls.__setitem__("trust", 1)
     )
@@ -192,8 +192,10 @@ def test_download_model_goes_online_and_loads_on_cpu(monkeypatch):
         return _FakeModel([])
 
     monkeypatch.setattr(transcription, "_load_whisper_model", fake_load)
+    monkeypatch.setattr(diarization, "download_embedder", lambda: calls.__setitem__("embedder", 1))
 
     transcription.download_model("base.en")
 
     assert calls["trust"] == 1  # download validates via OS trust store
     assert calls["loaded"] == ("base.en", "cpu", "int8")
+    assert calls["embedder"] == 1  # diarization embedder also fetched

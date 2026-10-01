@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from meeting_recorder import __version__, transcription, ui
+from meeting_recorder import __version__, diarization, transcription, ui
 from meeting_recorder.config import (
     MAX_DURATION_MIN,
     OUTPUT_DIR,
@@ -398,7 +398,8 @@ def _report_outputs(
 
 
 def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> None:
-    """Transcribe the mixed file, write the .md, and remove the wav on success.
+    """Transcribe the mixed file (with speaker labels), write the .md, and
+    remove the wav on success.
 
     Best-effort: any failure is logged and the audio is left in place so a
     recording is never lost to a transcription problem. Does nothing when there
@@ -410,7 +411,7 @@ def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> No
 
     dest_md = Path(args.transcript_dir) / f"{paths.mixed_final.stem}.md"
     try:
-        result = transcription.transcribe_file(
+        result = diarization.transcribe_with_speakers(
             paths.mixed_final,
             model=args.stt_model,
             device=args.stt_device,

@@ -15,8 +15,9 @@ tracks, then produces a normalized **mixed** file suitable for transcription.
   file is published via an atomic rename, so a `*.wav` watcher only ever sees a
   single finished file.
 - **Built-in transcription** (optional): after recording, the mixed file is
-  transcribed locally with faster-whisper into a Markdown transcript — no
-  external app or background service. Runs **fully offline** (see below).
+  transcribed locally with faster-whisper into a speaker-labeled Markdown
+  transcript (`Speaker 0:`, `Speaker 1:`, ...) — no external app or
+  background service. Runs **fully offline** (see below).
 
 ## Requirements
 
@@ -28,7 +29,7 @@ tracks, then produces a normalized **mixed** file suitable for transcription.
 ```powershell
 python -m pip install -e .                  # runtime
 python -m pip install -e ".[dev]"           # + test/lint/type tooling
-python -m pip install -e ".[transcribe]"    # + local transcription (faster-whisper, CUDA, truststore)
+python -m pip install -e ".[transcribe]"    # + local transcription & diarization (faster-whisper, speechbrain, CUDA, truststore)
 ```
 
 ## Usage
@@ -57,22 +58,28 @@ only the mixed file; the raw mic/system tracks are pruned after mixdown.
 ## Transcription (optional)
 
 With the `transcribe` extra installed, a finished recording is transcribed
-locally into a Markdown file, and (optionally) a downstream catch-up automation
-is fired. Nothing runs in the background between meetings — the model loads,
-transcribes, and exits with the recorder.
+locally into a speaker-labeled Markdown file, and (optionally) a downstream
+catch-up automation is fired. Nothing runs in the background between
+meetings — the models load, transcribe, and exit with the recorder.
+
+Speaker labels (`Speaker 0:`, `Speaker 1:`, ...) come from an ungated
+SpeechBrain ECAPA voice-embedding model clustering the audio into distinct
+speakers, merged with Whisper's word timestamps. They are not real names, and
+the clustering is a best-effort estimate, not guaranteed-accurate attribution.
 
 **Offline-first (company-PC safe).** Normal transcription makes **zero network
-calls**: the model is read from the local cache with `HF_HUB_OFFLINE=1` enforced
-in code. Fetch the model once, up front, on an approved network:
+calls**: both models are read from the local cache with `HF_HUB_OFFLINE=1`
+enforced in code. Fetch them once, up front, on an approved network:
 
 ```powershell
-python -m meeting_recorder --download-model     # one-time online cache fetch, then exits
+python -m meeting_recorder --download-model     # one-time online cache fetch (both models), then exits
 ```
 
 That is the **only** step that goes online, and it validates TLS against the
 Windows certificate store (via `truststore`) rather than disabling any check.
-GPU is used automatically when available (CUDA libraries ship in the extra),
-falling back to CPU otherwise.
+GPU is used automatically for Whisper when available (CUDA libraries ship in
+the extra), falling back to CPU otherwise; the speaker-embedding model always
+runs on CPU (it's small, and this keeps Whisper's GPU memory untouched).
 
 ```powershell
 python -m meeting_recorder --no-transcribe       # record only, skip transcription
@@ -97,12 +104,14 @@ src/meeting_recorder/
   recorder.py       StreamingDualRecorder (capture to disk)
   mixing.py         normalized, sample-rate-aware mixdown
   transcription.py  offline-first local STT (faster-whisper) + transcript write
+  diarization.py    speaker labeling (VAD + ECAPA embeddings + clustering)
   cli.py            argument parsing + run orchestration
 tests/
   test_mixing.py    unit: alignment, resampling, normalization (no hardware)
   test_devices.py   unit: device-selection logic (fake PyAudio)
   test_cli.py       unit: filename sanitization, path layout, transcription hook
   test_transcription.py  unit: STT device fallback, offline enforcement, writes
+  test_diarization.py    unit: VAD/embedding/clustering seams, word-speaker merge
   integration/      end-to-end tests that need real audio hardware
 ```
 
