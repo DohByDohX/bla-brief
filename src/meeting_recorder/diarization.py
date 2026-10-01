@@ -18,6 +18,9 @@ recordings -- treat the speaker count as a best-effort estimate.
 from __future__ import annotations
 
 import logging
+import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,7 +45,22 @@ from meeting_recorder.transcription import (
 
 log = logging.getLogger(__name__)
 
+# speechbrain logs its model-fetch/quirks chatter at INFO; it's noise for this
+# app's users, not actionable, so keep it at WARNING and above.
+logging.getLogger("speechbrain").setLevel(logging.WARNING)
+
 SAMPLE_RATE = 16000  # faster-whisper's internal decode/VAD rate
+
+
+@contextmanager
+def _quiet_model_load() -> Iterator[None]:
+    """Silence warnings that are noise here: an unrelated requests/urllib3
+    version mismatch, and torch's upstream weights_only=False advisory.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*doesn't match a supported version.*")
+        warnings.filterwarnings("ignore", category=FutureWarning, message=r".*weights_only.*")
+        yield
 
 
 @dataclass
@@ -70,30 +88,31 @@ def _load_embedder() -> Any:
     Runs on CPU on purpose: Whisper already owns the GPU, and embedding a
     meeting's worth of audio on CPU costs no VRAM.
     """
-    from speechbrain.inference.speaker import EncoderClassifier
-    from speechbrain.utils.fetching import LocalStrategy
+    with _quiet_model_load():
+        from speechbrain.inference.speaker import EncoderClassifier
+        from speechbrain.utils.fetching import LocalStrategy
 
-    return EncoderClassifier.from_hparams(
-        source=DIARIZE_MODEL,
-        savedir=str(DIARIZE_CACHE_DIR),
-        run_opts={"device": "cpu"},
-        local_strategy=LocalStrategy.COPY,  # avoid symlinks (need elevation on Windows)
-    )
+        return EncoderClassifier.from_hparams(
+            source=DIARIZE_MODEL,
+            savedir=str(DIARIZE_CACHE_DIR),
+            run_opts={"device": "cpu"},
+            local_strategy=LocalStrategy.COPY,  # avoid symlinks (need elevation on Windows)
+        )
 
 
 def download_embedder() -> None:
     """Fetch the diarization embedder into the local cache (online, one-time)."""
-    from speechbrain.utils.fetching import LocalStrategy
-
     _inject_system_trust_store()
-    from speechbrain.inference.speaker import EncoderClassifier
+    with _quiet_model_load():
+        from speechbrain.inference.speaker import EncoderClassifier
+        from speechbrain.utils.fetching import LocalStrategy
 
-    EncoderClassifier.from_hparams(
-        source=DIARIZE_MODEL,
-        savedir=str(DIARIZE_CACHE_DIR),
-        run_opts={"device": "cpu"},
-        local_strategy=LocalStrategy.COPY,  # avoid symlinks (need elevation on Windows)
-    )
+        EncoderClassifier.from_hparams(
+            source=DIARIZE_MODEL,
+            savedir=str(DIARIZE_CACHE_DIR),
+            run_opts={"device": "cpu"},
+            local_strategy=LocalStrategy.COPY,  # avoid symlinks (need elevation on Windows)
+        )
 
 
 def _embed_segments(embedder: Any, audio: np.ndarray, segments: list[_SpeechSegment]) -> np.ndarray:
