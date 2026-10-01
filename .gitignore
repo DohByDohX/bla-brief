@@ -26,6 +26,11 @@ Recordings/
 # Throwaway UI design mockups (local only)
 ui-mockup*.html
 
+# Diarization spike: generated/downloaded, not the deliverable
+spike/.models/
+spike/.*.cache.pkl
+spike/*.diarized.md
+
 # OpenCode / Grok workspace-local artifacts (machine-specific; recreated on open)
 .opencode/openwork.json
 .opencode/openwork/
