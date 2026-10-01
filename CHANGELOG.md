@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cluster IDs, not real names. Fetch the embedding model once with
   `--download-model` (same offline-first, one-time-online pattern as the
   Whisper model).
+- Diarization is now channel-aware: the mic track is a known fact (it's
+  always the local speaker), so it's labeled directly as `Local:` with no
+  embedding/clustering needed, and only the system/loopback track is
+  clustered -- so clustering only ever has to tell remote participants apart
+  from each other. The raw mic/system tracks are now kept until after
+  transcription (previously pruned right after mixdown) so diarization can
+  use them; they're deleted afterward unless `--keep-audio` is set (which now
+  means "keep all audio", not just the mixed file). Overlapping mic+system
+  speech renders as separate lines, one per active speaker, since there is
+  only one transcribed word stream to attribute.
 
 ### Changed
 - Default transcription model is now `small.en` (was `base.en`). Override

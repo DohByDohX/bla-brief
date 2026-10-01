@@ -14,7 +14,12 @@ import numpy as np
 import pytest
 
 from meeting_recorder import diarization
-from meeting_recorder.diarization import _SpeechSegment, transcribe_with_speakers
+from meeting_recorder.diarization import (
+    _assign_word_labels,
+    _render_transcript,
+    _SpeechSegment,
+    transcribe_with_speakers,
+)
 
 
 @dataclass
@@ -83,3 +88,77 @@ def test_transcribe_with_speakers_labels_each_turn(tmp_path: Path, monkeypatch):
 def test_transcribe_with_speakers_missing_file_raises():
     with pytest.raises(FileNotFoundError):
         transcribe_with_speakers(Path("does-not-exist.wav"))
+
+
+# -- overlap rendering (word -> label assignment + grouping) -----------------
+
+
+def test_assign_word_labels_handles_overlap_and_gaps():
+    segments = [
+        _SpeechSegment(start=0.0, end=1.0, label="Local"),
+        _SpeechSegment(start=0.5, end=1.5, label="Speaker 0"),  # overlaps 0.5-1.0
+    ]
+    words = [
+        {"start": 0.0, "end": 0.4, "text": "Hi "},  # Local only
+        {"start": 0.6, "end": 0.9, "text": "there "},  # both (overlap)
+        {"start": 2.0, "end": 2.4, "text": "gap"},  # neither
+    ]
+
+    labeled = _assign_word_labels(words, segments)
+
+    assert labeled[0]["labels"] == ["Local"]
+    assert labeled[1]["labels"] == ["Local", "Speaker 0"]
+    assert labeled[2]["labels"] == []
+
+
+def test_render_transcript_overlap_is_separate_lines_same_text():
+    words = [
+        {"text": "Hi ", "labels": ["Local"]},
+        {"text": "there ", "labels": ["Local", "Speaker 0"]},
+        {"text": "gap", "labels": []},
+    ]
+
+    text = _render_transcript(words)
+
+    assert text == "Local: Hi\nLocal: there\nSpeaker 0: there\nSpeaker None: gap"
+
+
+# -- channel-aware diarization (mic = Local, only system is clustered) ------
+
+
+def test_transcribe_with_speakers_channel_aware(tmp_path: Path, monkeypatch):
+    mixed = tmp_path / "mixed.wav"
+    mic = tmp_path / "mic.wav"
+    sys = tmp_path / "sys.wav"
+    for p in (mixed, mic, sys):
+        p.write_bytes(b"\0")
+
+    monkeypatch.setattr(diarization, "_register_cuda_dll_dirs", lambda: None)
+    monkeypatch.setattr(diarization, "_enable_offline", lambda: None)
+
+    # Mic ran 1s longer than system -> system started ~1s late (gets padded).
+    audio_by_path = {str(mic): np.zeros(32000), str(sys): np.zeros(16000)}
+    monkeypatch.setattr("faster_whisper.audio.decode_audio", lambda path, **k: audio_by_path[path])
+
+    def fake_run_vad(audio: np.ndarray) -> list[_SpeechSegment]:
+        if audio.size == 32000:  # mic track
+            return [_SpeechSegment(start=0.0, end=1.0)]
+        return [_SpeechSegment(start=0.0, end=0.5)]  # sys track, pre-alignment
+
+    monkeypatch.setattr(diarization, "_run_vad", fake_run_vad)
+    monkeypatch.setattr(diarization, "_load_embedder", lambda: object())
+    monkeypatch.setattr(diarization, "_embed_segments", lambda *a, **k: np.zeros((1, 4)))
+    monkeypatch.setattr(diarization, "_cluster", lambda embeddings: np.array([0]))
+
+    whisper_segments = [
+        _FakeWhisperSegment([_FakeWord(0.0, 0.5, "Hello "), _FakeWord(1.2, 1.5, "world.")]),
+    ]
+    monkeypatch.setattr(
+        diarization, "_load_whisper_model", lambda *a, **k: _FakeWhisperModel(whisper_segments)
+    )
+
+    result = transcribe_with_speakers(mixed, device="cpu", mic_path=mic, sys_path=sys)
+
+    # The system segment (0.0-0.5 raw) is shifted +1.0s to 1.0-1.5 in the
+    # mixed timeline, so "world." (at 1.2-1.5) lands on Speaker 0, not Local.
+    assert result.text == "Local: Hello\nSpeaker 0: world."

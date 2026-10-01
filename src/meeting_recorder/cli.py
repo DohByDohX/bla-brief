@@ -333,8 +333,15 @@ def _rename_recording(
     return new
 
 
-def _produce_outputs(paths: RecordingPaths, args: argparse.Namespace, keep: set[str]) -> None:
-    """Mix (when requested), prune unselected tracks, and report what was kept."""
+def _produce_outputs(
+    paths: RecordingPaths, args: argparse.Namespace, keep: set[str]
+) -> tuple[bool, bool]:
+    """Mix (when requested) and report what was kept.
+
+    Does NOT prune the raw tracks -- diarization may still need them (see
+    :func:`_prune_unkept_tracks`, called once transcription is done). Returns
+    ``(keep_mic, keep_sys)``: whether each raw track should ultimately survive.
+    """
     mic_ok = paths.mic_path.exists() and paths.mic_path.stat().st_size > 44
     sys_ok = paths.sys_path.exists() and paths.sys_path.stat().st_size > 44
 
@@ -370,13 +377,21 @@ def _produce_outputs(paths: RecordingPaths, args: argparse.Namespace, keep: set[
     elif want_mixed:
         log.error("Both tracks are empty; nothing to mix!")
 
-    # Prune the raw tracks that are not being kept.
-    if not keep_mic:
-        _safe_unlink(paths.mic_path)
-    if not keep_sys:
-        _safe_unlink(paths.sys_path)
-
     _report_outputs(paths, mixed_made, keep_mic, keep_sys)
+    return keep_mic, keep_sys
+
+
+def _prune_unkept_tracks(
+    paths: RecordingPaths, keep_mic: bool, keep_sys: bool, keep_audio: bool
+) -> None:
+    """Delete the raw mic/system tracks, unless kept for the empty-track
+    fallback (``keep_mic``/``keep_sys``) or explicitly requested (``--keep-audio``
+    means keep ALL audio, not just the mixed file).
+    """
+    if not keep_mic and not keep_audio:
+        _safe_unlink(paths.mic_path)
+    if not keep_sys and not keep_audio:
+        _safe_unlink(paths.sys_path)
 
 
 def _report_outputs(
@@ -397,17 +412,19 @@ def _report_outputs(
     ui.output_summary(entries, published=published, tracks_dir=tracks_dir)
 
 
-def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> None:
+def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> bool:
     """Transcribe the mixed file (with speaker labels), write the .md, and
     remove the wav on success.
 
     Best-effort: any failure is logged and the audio is left in place so a
     recording is never lost to a transcription problem. Does nothing when there
-    is no mixed file (e.g. the user chose not to keep it).
+    is no mixed file (e.g. the user chose not to keep it). Returns whether a
+    transcript was successfully written (the caller uses this to decide
+    whether the raw mic/system tracks are now safe to prune).
     """
     if not paths.mixed_final.exists():
         log.warning("No mixed file to transcribe; skipping transcription.")
-        return
+        return False
 
     dest_md = Path(args.transcript_dir) / f"{paths.mixed_final.stem}.md"
     try:
@@ -416,14 +433,16 @@ def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> No
             model=args.stt_model,
             device=args.stt_device,
             language=args.stt_language,
+            mic_path=paths.mic_path,
+            sys_path=paths.sys_path,
         )
     except Exception as exc:  # noqa: BLE001 - never lose audio to a transcription error
         log.error("Transcription failed (%s); keeping the audio file.", exc)
-        return
+        return False
 
     if not result.text.strip():
         log.warning("Transcription produced no text; keeping the audio, not writing a transcript.")
-        return
+        return False
 
     md_path = transcription.write_transcript(result.text, dest_md)
     log.info("Transcript written to %s (%s).", md_path, result.device)
@@ -435,6 +454,8 @@ def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> No
 
     if args.run_automation:
         _fire_automation(Path(args.automation_script))
+
+    return True
 
 
 def _fire_automation(script: Path) -> None:
@@ -496,12 +517,20 @@ def _finalize(
                 paths, name, Path(args.output_dir), args.tracks_dir, timestamp
             )
 
-    # Only the mixed file is kept; the raw mic/system tracks are pruned after
-    # mixdown (the empty-track fallback in _produce_outputs still applies).
-    _produce_outputs(paths, args, keep={"mixed"})
+    # Only the mixed file is meant to survive long-term; the raw mic/system
+    # tracks are kept just long enough for channel-aware diarization to use
+    # them (see _transcribe_recording), then pruned below (the empty-track
+    # fallback in _produce_outputs still applies).
+    keep_mic, keep_sys = _produce_outputs(paths, args, keep={"mixed"})
 
+    transcribed_ok = True
     if args.transcribe:
-        _transcribe_recording(paths, args)
+        transcribed_ok = _transcribe_recording(paths, args)
+
+    if transcribed_ok:
+        _prune_unkept_tracks(paths, keep_mic, keep_sys, args.keep_audio)
+    else:
+        log.info("Keeping raw mic/system tracks; transcription did not complete.")
 
     print("\n  Done!\n")
 

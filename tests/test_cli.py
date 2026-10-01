@@ -15,6 +15,7 @@ from meeting_recorder.cli import (
     _limit_reached,
     _parse_args,
     _produce_outputs,
+    _prune_unkept_tracks,
     _rename_recording,
     _transcribe_recording,
     build_paths,
@@ -105,7 +106,8 @@ def _paths_with_tracks(tmp_path: Path, *, mic_s: float, sys_s: float):
 
 def test_produce_outputs_mixed_only_prunes_raw_tracks(tmp_path: Path):
     paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
-    _produce_outputs(paths, _args(), keep={"mixed"})
+    keep_mic, keep_sys = _produce_outputs(paths, _args(), keep={"mixed"})
+    _prune_unkept_tracks(paths, keep_mic, keep_sys, keep_audio=False)
 
     # Only the published mixed file survives; the raw tracks are removed.
     assert paths.mixed_final.exists()
@@ -135,7 +137,8 @@ def test_produce_outputs_keeps_usable_track_when_mix_impossible(tmp_path: Path):
 
 def test_produce_outputs_discard_tracks_forces_mixed_only(tmp_path: Path):
     paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
-    _produce_outputs(paths, _args(discard_tracks=True), keep=set(ALL_OUTPUTS))
+    keep_mic, keep_sys = _produce_outputs(paths, _args(discard_tracks=True), keep=set(ALL_OUTPUTS))
+    _prune_unkept_tracks(paths, keep_mic, keep_sys, keep_audio=False)
 
     assert paths.mixed_final.exists()
     assert not paths.mic_path.exists()
@@ -236,11 +239,31 @@ def test_transcribe_writes_md_and_deletes_wav(tmp_path: Path, monkeypatch):
         lambda *a, **k: transcription.TranscriptionResult("Hello team.", "en", 1.0, "cpu"),
     )
 
-    _transcribe_recording(paths, _stt_args(tmp_path))
+    ok = _transcribe_recording(paths, _stt_args(tmp_path))
 
     md = Path(tmp_path / "Raw" / f"{paths.mixed_final.stem}.md")
     assert md.read_text(encoding="utf-8") == "Hello team.\n"
     assert not paths.mixed_final.exists()  # wav removed after success
+    assert ok is True
+
+
+def test_transcribe_passes_mic_and_system_paths_for_channel_aware_diarization(
+    tmp_path: Path, monkeypatch
+):
+    paths = _make_mixed(tmp_path)
+    calls: dict[str, object] = {}
+
+    def fake_transcribe(wav_path, *, mic_path=None, sys_path=None, **_k):
+        calls["mic_path"] = mic_path
+        calls["sys_path"] = sys_path
+        return transcription.TranscriptionResult("Hi.", "en", 1.0, "cpu")
+
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", fake_transcribe)
+
+    _transcribe_recording(paths, _stt_args(tmp_path))
+
+    assert calls["mic_path"] == paths.mic_path
+    assert calls["sys_path"] == paths.sys_path
 
 
 def test_transcribe_keep_audio_retains_wav(tmp_path: Path, monkeypatch):
@@ -264,10 +287,11 @@ def test_transcribe_failure_keeps_wav_and_writes_nothing(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(diarization, "transcribe_with_speakers", boom)
 
-    _transcribe_recording(paths, _stt_args(tmp_path))
+    ok = _transcribe_recording(paths, _stt_args(tmp_path))
 
     assert paths.mixed_final.exists()  # never lose audio on failure
     assert not (tmp_path / "Raw").exists() or list((tmp_path / "Raw").glob("*.md")) == []
+    assert ok is False
 
 
 def test_transcribe_empty_text_keeps_wav_and_writes_nothing(tmp_path: Path, monkeypatch):
@@ -282,6 +306,15 @@ def test_transcribe_empty_text_keeps_wav_and_writes_nothing(tmp_path: Path, monk
 
     assert paths.mixed_final.exists()
     assert not (tmp_path / "Raw").exists() or list((tmp_path / "Raw").glob("*.md")) == []
+
+
+def test_prune_unkept_tracks_keep_audio_preserves_raw_tracks(tmp_path: Path):
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
+
+    _prune_unkept_tracks(paths, keep_mic=False, keep_sys=False, keep_audio=True)
+
+    assert paths.mic_path.exists()
+    assert paths.sys_path.exists()
 
 
 def test_transcribe_no_mixed_file_is_noop(tmp_path: Path, monkeypatch):
