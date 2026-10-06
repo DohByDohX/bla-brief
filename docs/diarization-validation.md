@@ -209,4 +209,70 @@ contamination.
 
 ---
 
+## 2026-10-06 — Optimus / Logistics Strategy & Immigration (Post-Dedup & VAD-Fix)
+
+**File:** `2026-10-06_1433.md`
+**Quality score:** 6.5/10 (partial success; near-duplicate dedup incomplete)
+**Fixes tested:** Near-duplicate dedup (#2), VAD segment filtering (#3)
+**Commit reference:** Applied on top of fix/overlap-duplication
+
+### Findings
+
+**Near-duplicate dedup partially effective** ⚠️ — The exact-duplicate lines are
+gone (no more `"No, no, no. You didn't"` → `Speaker 0: No, no, no. You didn't"`
+pattern), BUT many near-duplicate/fragment patterns remain, particularly between
+`Local` and `Speaker 0`:
+- `Local: No worries, I just got` → `Speaker 0: No worries, I just got` → `Speaker 0: a meeting. So,`
+- `Local: Well, that's` → `Speaker 0: Well, that's` → `Speaker 0: progress.`
+- `Local: And then I had to` → `Speaker 0: And then I had to` → continues
+- `Local: And like I` → `Speaker 0: And like I` → continues
+- `Local: Yeah, they just` → `Speaker 0: Yeah, they just` → continues
+- ~20–30+ similar fragment duplications throughout the 540-line transcript
+
+These suggest the dedup logic may only be removing **exact** duplicates, not
+near-duplicates (fragments that match but end at slightly different boundaries
+or with different continuations).
+
+**VAD segment filtering partially effective** ⚠️ — Still present but reduced in
+frequency. ~30–40 `Speaker None` fragments across the long transcript ("forgot",
+"she", "that", "I", "chart", "Excel", "based", "yeah", "ownership", "slamming",
+"and", "get", "at", "but", "you", "know", "I", "it", "no", "this", etc.). This
+is still lower than meetings 1–3, suggesting the VAD fix is helping somewhat,
+but short segments are still falling through.
+
+**`Speaker 0` remains a mix of real + artifact** — Unlike meeting 2 (where
+`Speaker 0` was 100% duplicate) or meeting 3 (where it had original content),
+here `Speaker 0` shows many duplicated fragments followed by original
+contributions. This suggests the upstream channel-aware processing is still
+confused about which audio belongs to which channel in high-overlap regions.
+
+**Structural quality is good** — Long monologues and low-overlap sequences are
+clean and coherent (e.g., John's extended stories about risk tolerance, career
+growth, logistics philosophy). The issue is specifically with conversational
+back-and-forth where speakers naturally overlap or interrupt.
+
+### Quality vs post-overlap-fix
+| Item | Status |
+|------|--------|
+| Exact duplicates (e.g. meeting 2 pattern) | ✅ Fixed |
+| Near-duplicate fragments | ⚠️ Partial (still ~20–30 instances) |
+| `Speaker None` fragments | ⚠️ Partial (reduced to ~30–40) |
+| Long-form monologues | ✅ Clean |
+| Speaker separation (real speakers) | ✅ Good |
+
+### Recommended refinements
+1. **Enhance dedup logic to match near-duplicates** — current dedup only
+   catches exact duplicates. Extend to detect fragments that match up to 80–90%
+   similarity AND are consecutive across speaker boundaries. This would catch
+   the trailing-fragment pattern seen here.
+2. **VAD `min_segment` tuning** (0.3s → 0.5–0.7s) — still valid and needed,
+   but not sufficient by itself. The near-duplicate issue is now the primary
+   defect.
+3. **Investigate channel-alignment in high-overlap regions** — the fact that
+   `Speaker 0` shows duplicated fragments suggests the alignment offset or
+   VAD windowing may still have edge-case issues when one speaker's turn
+   overlaps with the other's.
+
+---
+
 <!-- Add new entries above this line as more meetings are validated. -->
