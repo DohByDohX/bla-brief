@@ -17,6 +17,7 @@ from meeting_recorder import diarization
 from meeting_recorder.diarization import (
     _assign_word_labels,
     _dedup_consecutive_duplicates,
+    _is_near_duplicate,
     _render_transcript,
     _SpeechSegment,
     transcribe_with_speakers,
@@ -179,6 +180,36 @@ def test_dedup_consecutive_duplicates_keeps_genuine_overlap_without_resumption()
     result = _dedup_consecutive_duplicates(transcript)
 
     assert result == transcript
+
+
+def test_is_near_duplicate_matches_minor_punctuation_differences():
+    """Trailing punctuation noise shouldn't block a duplicate match."""
+    assert _is_near_duplicate("a bit", "a bit.")
+    assert _is_near_duplicate("check-in, check", "check-in, check")
+
+
+def test_is_near_duplicate_rejects_genuinely_different_text():
+    """Short shared prefix with substantially different content isn't a duplicate."""
+    assert not _is_near_duplicate("load", "load those bots")
+    assert not _is_near_duplicate("Hello", "Hi there")
+
+
+def test_dedup_consecutive_duplicates_handles_near_duplicate_punctuation():
+    """Near-duplicate text (punctuation-only diff) under a different speaker is dropped."""
+    transcript = "Local: a bit.\nSpeaker 5: a bit.\nLocal: And then, what is repacking?"
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == "Local: a bit.\nLocal: And then, what is repacking?"
+
+
+def test_dedup_consecutive_duplicates_handles_chain_of_near_duplicates():
+    """A chain where each echo has slightly different trailing punctuation still collapses."""
+    transcript = "A: a bit.\nB: a bit,\nC: a bit\nA: moving on now"
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == "A: a bit.\nA: moving on now"
 
 
 # -- channel-aware diarization (mic = Local, only system is clustered) ------

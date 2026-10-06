@@ -30,6 +30,7 @@ import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, cast
 
@@ -244,13 +245,37 @@ def _render_transcript(words: list[dict[str, Any]]) -> str:
     return _dedup_consecutive_duplicates("\n".join(lines))
 
 
+_DUPLICATE_SIMILARITY_THRESHOLD = 0.9
+_TRAILING_PUNCTUATION = ".,!?;:"
+
+
+def _normalize_for_comparison(text: str) -> str:
+    """Strip trailing punctuation/case noise that Whisper applies inconsistently
+    to the same utterance when it's split across overlapping segments.
+    """
+    return text.strip().rstrip(_TRAILING_PUNCTUATION).strip().lower()
+
+
+def _is_near_duplicate(a: str, b: str) -> bool:
+    """True if ``a`` and ``b`` are the same utterance modulo minor transcription
+    noise (trailing punctuation, filler words picked up differently, etc).
+    """
+    norm_a, norm_b = _normalize_for_comparison(a), _normalize_for_comparison(b)
+    if not norm_a or not norm_b:
+        return norm_a == norm_b
+    if norm_a == norm_b:
+        return True
+    return SequenceMatcher(None, norm_a, norm_b).ratio() >= _DUPLICATE_SIMILARITY_THRESHOLD
+
+
 def _dedup_consecutive_duplicates(transcript: str) -> str:
-    """Remove runs of consecutive lines that repeat the same text verbatim under
-    different speaker labels.
+    """Remove runs of consecutive lines that repeat the same (or near-identical)
+    text under different speaker labels.
 
     Artifact pattern: Speaker A says X, then one or more other speakers echo the
-    same X (mis-segmentation from overlapping mic/system audio), then A resumes
-    with new text. The whole echoed run is dropped, keeping only A's original line.
+    same X -- verbatim or with minor transcription noise -- (mis-segmentation
+    from overlapping mic/system audio), then A resumes with new text. The whole
+    echoed run is dropped, keeping only A's original line.
 
     Genuine overlap (kept as-is): the repeated line is not followed by the
     original speaker resuming with new text -- e.g. two people say "yeah" at
@@ -269,12 +294,17 @@ def _dedup_consecutive_duplicates(transcript: str) -> str:
         deduped.append(lines[i])
 
         j = i + 1
-        while j < n and text_i.strip() and parsed[j][1] == text_i:
+        while j < n and text_i.strip() and _is_near_duplicate(parsed[j][1], text_i):
             j += 1
 
-        # lines[i+1:j] all repeat text_i verbatim; drop the run only if the
-        # original speaker resumes with new text right after it.
-        if j > i + 1 and j < n and parsed[j][0] == speaker_i and parsed[j][1] != text_i:
+        # lines[i+1:j] all echo text_i; drop the run only if the original
+        # speaker resumes with genuinely different text right after it.
+        if (
+            j > i + 1
+            and j < n
+            and parsed[j][0] == speaker_i
+            and not _is_near_duplicate(parsed[j][1], text_i)
+        ):
             i = j
         else:
             i += 1

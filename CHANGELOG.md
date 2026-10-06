@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- The diarization duplicate-rendering fix above only caught verbatim text
+  matches. Extended it to near-duplicates: Whisper sometimes transcribes the
+  echoed fragment with slightly different trailing punctuation (e.g. "a bit."
+  vs "a bit,"), which a strict equality check missed. Text is now compared
+  after stripping trailing punctuation/case, with a fuzzy-ratio fallback for
+  anything that still differs, so echoed fragments are caught regardless of
+  minor transcription noise while genuinely different utterances (even short
+  ones) are left alone.
 - Overlap duplication artifact in diarization: when mic and system tracks
   overlapped in time (during cross-talk), the same word sequence was rendered
   twice under different speaker labels. Added post-rendering dedup step that
