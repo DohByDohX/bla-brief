@@ -260,14 +260,39 @@ back-and-forth where speakers naturally overlap or interrupt.
 | Long-form monologues | ✅ Clean |
 | Speaker separation (real speakers) | ✅ Good |
 
-### Recommended refinements
-1. **Enhance dedup logic to match near-duplicates** — current dedup only
-   catches exact duplicates. Extend to detect fragments that match up to 80–90%
-   similarity AND are consecutive across speaker boundaries. This would catch
-   the trailing-fragment pattern seen here.
-2. **VAD `min_segment` tuning** (0.3s → 0.5–0.7s) — still valid and needed,
-   but not sufficient by itself. The near-duplicate issue is now the primary
-   defect.
+### Recommended refinements (superseded, see correction below)
+1. ~~Enhance dedup logic to match near-duplicates~~ — see correction: this
+   meeting's remaining fragments are not a similarity-threshold problem.
+2. ~~VAD `min_segment` tuning (0.3s → 0.5–0.7s)~~ — see correction: this was
+   already investigated and ruled out during Fix #3.
+
+### Correction (after Fix #3 + re-analysis of this transcript)
+
+Two things above don't hold up:
+
+**Not a near-duplicate/similarity problem.** All ~25+ `Local` → `Speaker 0`
+fragment pairs here are *exact* text matches (e.g. `And then I had to` /
+`And then I had to`), so Fix #2's fuzzy matching isn't the gap. The real
+reason they survive is structural: our dedup only drops an echoed fragment
+when the *original* speaker (`Local`) resumes afterward with new text — that's
+how it tells an artifact apart from genuine simultaneous speech. In this
+meeting it's consistently the *other* speaker (`Speaker 0`) who continues, so
+the heuristic (correctly, by its current design) treats it as overlap and
+keeps both lines. This looks like acoustic echo/mic bleed-through (John is on
+a phone outdoors through computer speakers, not headphones) rather than
+genuine overlapping speech -- a new root cause outside what Fix #1/#2 target,
+not a tuning gap in them.
+
+**Raising `DIARIZE_MIN_SEGMENT_S` would not help, and was already ruled out.**
+Fix #3 found the opposite: the min-segment filter was removed entirely from
+the mic (`Local`) path (it never needed it -- no embedding step), and is kept
+only on the system/cluster path where it protects embedding quality. Raising
+it further would filter out *more* system-channel segments, producing more
+`Speaker None`, not less. The `Speaker None` fragments remaining here are
+inside continuous `Local` monologues (e.g. "she", "that", "because" mid
+paragraph) -- these are VAD inter-segment gaps from `min_silence_duration_ms`
+treating brief breathing pauses as silence, a different mechanism than
+segment-length filtering, and not yet addressed by any of the 3 fixes.
 3. **Investigate channel-alignment in high-overlap regions** — the fact that
    `Speaker 0` shows duplicated fragments suggests the alignment offset or
    VAD windowing may still have edge-case issues when one speaker's turn

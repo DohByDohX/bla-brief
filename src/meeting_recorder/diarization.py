@@ -254,6 +254,11 @@ def _render_transcript(words: list[dict[str, Any]]) -> str:
 
 _DUPLICATE_SIMILARITY_THRESHOLD = 0.9
 _TRAILING_PUNCTUATION = ".,!?;:"
+# A verbatim echo this long or longer is implausible as a coincidence -- two
+# speakers don't independently say the same multi-word phrase at once -- so
+# it's treated as a mic/system bleed-through artifact even if the *other*
+# speaker is the one who continues afterward.
+_SUBSTANTIAL_ECHO_MIN_WORDS = 3
 
 
 def _normalize_for_comparison(text: str) -> str:
@@ -284,9 +289,16 @@ def _dedup_consecutive_duplicates(transcript: str) -> str:
     from overlapping mic/system audio), then A resumes with new text. The whole
     echoed run is dropped, keeping only A's original line.
 
-    Genuine overlap (kept as-is): the repeated line is not followed by the
-    original speaker resuming with new text -- e.g. two people say "yeah" at
-    the same time and the conversation moves on from there instead.
+    A long echo (``_SUBSTANTIAL_ECHO_MIN_WORDS`` or more) is dropped
+    unconditionally instead, even if it's the *other* speaker who continues
+    afterward: two people independently saying the same multi-word phrase at
+    the same time isn't a plausible coincidence, so it's still treated as a
+    bleed-through artifact.
+
+    Genuine overlap (kept as-is): a short (1-2 word) repeated line that isn't
+    followed by the original speaker resuming with new text -- e.g. two people
+    say "yeah" at the same time and the conversation moves on from there
+    instead.
     """
     lines = transcript.split("\n")
     if len(lines) < 2:
@@ -304,17 +316,18 @@ def _dedup_consecutive_duplicates(transcript: str) -> str:
         while j < n and text_i.strip() and _is_near_duplicate(parsed[j][1], text_i):
             j += 1
 
-        # lines[i+1:j] all echo text_i; drop the run only if the original
-        # speaker resumes with genuinely different text right after it.
-        if (
-            j > i + 1
-            and j < n
-            and parsed[j][0] == speaker_i
-            and not _is_near_duplicate(parsed[j][1], text_i)
-        ):
-            i = j
-        else:
-            i += 1
+        # lines[i+1:j] all echo text_i. Drop the run if the original speaker
+        # resumes with genuinely different text right after it, or if the
+        # echoed text itself is too long to be a plausible coincidence.
+        if j > i + 1:
+            original_resumes = (
+                j < n and parsed[j][0] == speaker_i and not _is_near_duplicate(parsed[j][1], text_i)
+            )
+            is_substantial_echo = len(text_i.split()) >= _SUBSTANTIAL_ECHO_MIN_WORDS
+            if original_resumes or is_substantial_echo:
+                i = j
+                continue
+        i += 1
 
     return "\n".join(deduped)
 

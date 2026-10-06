@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Multi-word echoes across speaker boundaries (e.g. `Local: No worries, I just
+  got` / `Speaker 0: No worries, I just got`) were surviving dedup when the
+  *other* speaker (not the original) continued afterward -- our heuristic
+  treated that as genuine simultaneous speech. But two speakers independently
+  saying the same 3+ word phrase at the same time isn't a plausible
+  coincidence; it's almost always the same audio bleeding into both the mic
+  and system channels. Echoes of `_SUBSTANTIAL_ECHO_MIN_WORDS` (3) or more
+  words are now dropped unconditionally, regardless of which speaker
+  continues. Short 1-2 word echoes (e.g. "yeah", "right") still only drop when
+  the original speaker resumes, since those plausibly are genuine
+  backchanneling. Found via real-world testing on a phone-call-style meeting
+  (no headset) with heavy acoustic bleed-through.
 - Short acknowledgments ("Okay", "Yeah", single words) on the mic channel were
   rendering as `Speaker None` instead of `Local:`. Root cause: the VAD
   min-segment filter (`DIARIZE_MIN_SEGMENT_S`, protecting the ECAPA embedder
