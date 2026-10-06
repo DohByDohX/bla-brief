@@ -16,6 +16,7 @@ import pytest
 from meeting_recorder import diarization
 from meeting_recorder.diarization import (
     _assign_word_labels,
+    _dedup_consecutive_duplicates,
     _render_transcript,
     _SpeechSegment,
     transcribe_with_speakers,
@@ -121,6 +122,63 @@ def test_render_transcript_overlap_is_separate_lines_same_text():
     text = _render_transcript(words)
 
     assert text == "Local: Hi\nLocal: there\nSpeaker 0: there\nSpeaker None: gap"
+
+
+# -- dedup consecutive identical text (overlap artifact fix) -----------------
+
+
+def test_dedup_consecutive_duplicates_removes_duplicate_text():
+    """Consecutive lines with identical text but different speakers → keep first only."""
+    transcript = "Local: decided to like okay\nSpeaker 2: decided to like okay\nLocal: let's wait"
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == "Local: decided to like okay\nLocal: let's wait"
+
+
+def test_dedup_consecutive_duplicates_preserves_non_duplicates():
+    """Lines with different text or same speaker → unchanged."""
+    transcript = "Local: Hello\nSpeaker 2: Hi there\nSpeaker 2: How are you"
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == transcript
+
+
+def test_dedup_consecutive_duplicates_handles_multiple_duplicates():
+    """Multiple duplicate groups → all deduplicated."""
+    transcript = (
+        "Local: No\nSpeaker 2: No\nLocal: no no But that\nSpeaker 0: no no But that\n"
+        "Local: was a good call"
+    )
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == "Local: No\nLocal: no no But that\nLocal: was a good call"
+
+
+def test_dedup_consecutive_duplicates_empty_or_single_line():
+    """Empty or single-line transcripts → unchanged."""
+    assert _dedup_consecutive_duplicates("") == ""
+    assert _dedup_consecutive_duplicates("Local: Hello") == "Local: Hello"
+
+
+def test_dedup_consecutive_duplicates_handles_chain_of_three_echoes():
+    """Three speakers echoing the same text before the original resumes → all dropped."""
+    transcript = "A: X\nB: X\nC: X\nA: Y"
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == "A: X\nA: Y"
+
+
+def test_dedup_consecutive_duplicates_keeps_genuine_overlap_without_resumption():
+    """Duplicate not followed by the original speaker resuming → treated as real overlap."""
+    transcript = "A: X\nB: X\nB: Y"
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == transcript
 
 
 # -- channel-aware diarization (mic = Local, only system is clustered) ------

@@ -31,7 +31,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -177,8 +177,10 @@ def _diarize_channel_aware(mic_path: Path, sys_path: Path) -> list[_SpeechSegmen
     """
     from faster_whisper.audio import decode_audio
 
-    mic_audio = decode_audio(str(mic_path), sampling_rate=SAMPLE_RATE)
-    sys_audio = decode_audio(str(sys_path), sampling_rate=SAMPLE_RATE)
+    # split_stereo defaults to False, so this always returns a plain ndarray,
+    # never the stereo tuple variant in decode_audio's return type.
+    mic_audio = cast(np.ndarray, decode_audio(str(mic_path), sampling_rate=SAMPLE_RATE))
+    sys_audio = cast(np.ndarray, decode_audio(str(sys_path), sampling_rate=SAMPLE_RATE))
     offset_sec = resolve_alignment_offset_s(
         len(mic_audio) / SAMPLE_RATE, len(sys_audio) / SAMPLE_RATE, SAMPLE_RATE
     )
@@ -239,7 +241,53 @@ def _render_transcript(words: list[dict[str, Any]]) -> str:
             buffer = []
         buffer.append(word["text"])
     flush()
-    return "\n".join(lines)
+    return _dedup_consecutive_duplicates("\n".join(lines))
+
+
+def _dedup_consecutive_duplicates(transcript: str) -> str:
+    """Remove runs of consecutive lines that repeat the same text verbatim under
+    different speaker labels.
+
+    Artifact pattern: Speaker A says X, then one or more other speakers echo the
+    same X (mis-segmentation from overlapping mic/system audio), then A resumes
+    with new text. The whole echoed run is dropped, keeping only A's original line.
+
+    Genuine overlap (kept as-is): the repeated line is not followed by the
+    original speaker resuming with new text -- e.g. two people say "yeah" at
+    the same time and the conversation moves on from there instead.
+    """
+    lines = transcript.split("\n")
+    if len(lines) < 2:
+        return transcript
+
+    parsed = [_parse_speaker_line(line) for line in lines]
+    deduped: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        speaker_i, text_i = parsed[i]
+        deduped.append(lines[i])
+
+        j = i + 1
+        while j < n and text_i.strip() and parsed[j][1] == text_i:
+            j += 1
+
+        # lines[i+1:j] all repeat text_i verbatim; drop the run only if the
+        # original speaker resumes with new text right after it.
+        if j > i + 1 and j < n and parsed[j][0] == speaker_i and parsed[j][1] != text_i:
+            i = j
+        else:
+            i += 1
+
+    return "\n".join(deduped)
+
+
+def _parse_speaker_line(line: str) -> tuple[str, str]:
+    """Extract speaker label and text from a 'Speaker X: text' line."""
+    if ": " not in line:
+        return ("", line)
+    speaker, _, text = line.partition(": ")
+    return (speaker, text)
 
 
 def transcribe_with_speakers(
@@ -272,7 +320,8 @@ def transcribe_with_speakers(
     else:
         from faster_whisper.audio import decode_audio
 
-        segments = _diarize_single_track(decode_audio(str(wav_path), sampling_rate=SAMPLE_RATE))
+        audio = cast(np.ndarray, decode_audio(str(wav_path), sampling_rate=SAMPLE_RATE))
+        segments = _diarize_single_track(audio)
 
     last_error: Exception | None = None
     for dev in _candidate_devices(device):
