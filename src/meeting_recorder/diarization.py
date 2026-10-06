@@ -86,11 +86,10 @@ def _run_vad(audio: np.ndarray) -> list[_SpeechSegment]:
 
     opts = VadOptions(min_silence_duration_ms=500)
     timestamps = get_speech_timestamps(audio, opts)
-    segments = [
+    return [
         _SpeechSegment(start=ts["start"] / SAMPLE_RATE, end=ts["end"] / SAMPLE_RATE)
         for ts in timestamps
     ]
-    return [s for s in segments if (s.end - s.start) >= DIARIZE_MIN_SEGMENT_S]
 
 
 def _load_embedder() -> Any:
@@ -154,8 +153,14 @@ def _cluster(embeddings: np.ndarray) -> np.ndarray:
 
 
 def _diarize_single_track(audio: np.ndarray) -> list[_SpeechSegment]:
-    """VAD + embed + cluster one audio stream into labeled segments."""
-    segments = _run_vad(audio)
+    """VAD + embed + cluster one audio stream into labeled segments.
+
+    Segments shorter than ``DIARIZE_MIN_SEGMENT_S`` are dropped before
+    embedding -- ECAPA needs a minimum amount of audio for a reliable speaker
+    embedding, so a too-short sliver is left unlabeled (renders as
+    "Speaker None") rather than risk a garbage cluster assignment.
+    """
+    segments = [s for s in _run_vad(audio) if (s.end - s.start) >= DIARIZE_MIN_SEGMENT_S]
     if not segments:
         return segments
     embedder = _load_embedder()
@@ -187,6 +192,8 @@ def _diarize_channel_aware(mic_path: Path, sys_path: Path) -> list[_SpeechSegmen
     )
     mic_pad, sys_pad = max(0.0, -offset_sec), max(0.0, offset_sec)
 
+    # No min-segment filter here: the mic channel is labeled directly with no
+    # embedding step, so even a one-word "okay" segment is safe to keep.
     mic_segments = _run_vad(mic_audio)
     for seg in mic_segments:
         seg.start += mic_pad
