@@ -163,4 +163,50 @@ acknowledgments).
 
 ---
 
+## 2026-10-06 — Internal Fleet / Optimus Support (Post-Overlap-Fix)
+
+**File:** `2026-10-06_1203.md`
+**Quality score:** 8.5/10 (major improvement post-fix)
+**Fix tested:** Overlap-duplication bug fix (commit a1d0204, `fix/overlap-duplication`)
+
+### Findings
+
+**Overlap-duplication bug is FIXED** ✅ — No pervasive trailing-fragment
+duplication at turn boundaries. Speaker turns flow cleanly with original,
+non-repeated content. This meeting had multiple speakers with natural
+back-and-forth, and none of the systematic duplication pattern seen in meetings
+2 & 3. Examples of clean turns:
+- `Speaker 1: ...production day just request for parents...` (original)
+- `Speaker 2: good morning team...` (original, not duplicating Speaker 1)
+- No `Speaker 0` phantom cluster appearing as pure duplicates
+
+**Remaining `Speaker None` fragments** — still present but fewer and less
+intrusive than meeting 1 (5–7 instances: "on", "low", "yeah", "seems", "taking").
+These appear to be edge cases (very short segments at overlap boundaries, or
+very quiet utterances). VAD `min_segment` tuning would help but is now a
+lower-priority cosmetic fix.
+
+**Natural speaker separation maintained** — `Speaker 1`, `Speaker 2`, and
+`Local` are consistently and correctly attributed across turns; no cross-cluster
+contamination.
+
+### Quality improvement vs previous meetings
+| Meeting | Quality | Primary Issue | Status |
+|---------|---------|-------|--------|
+| 2026-10-02 (Pre-fix) | 4/10 | Overlap duplication ~100% | ❌ Broken |
+| 2026-10-05 (Pre-fix) | 6/10 | Overlap duplication ~30–40% | ⚠️ Moderate |
+| **2026-10-06 (Post-fix)** | **8.5/10** | **VAD fragments only (~5–7)** | **✅ Fixed** |
+
+### Recommended next steps
+1. ✅ **Overlap-duplication fix is effective.** Keep this change. Validate on a
+   few more meetings to confirm consistency across varying cross-talk volumes.
+2. **VAD `min_segment` tuning (0.3s → 0.5–0.7s)** — now the only
+   remaining low-hanging fruit. Would eliminate the remaining `Speaker None`
+   fragments and improve end-user experience, though not critical.
+3. (Optional) **Speaker None fragment handling** — consider a threshold-based
+   merge (collapse very short orphan segments into adjacent speaker turns if
+   confidence is below a threshold).
+
+---
+
 <!-- Add new entries above this line as more meetings are validated. -->
