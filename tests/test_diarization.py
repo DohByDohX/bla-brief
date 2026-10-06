@@ -116,7 +116,12 @@ def test_assign_word_labels_handles_overlap_and_gaps():
     assert labeled[2]["labels"] == []
 
 
-def test_render_transcript_overlap_is_separate_lines_same_text():
+def test_render_transcript_overlap_collapses_to_one_line_per_dedup():
+    """_assign_word_labels can mark a word as active under two labels at once
+    (true overlap), but _render_transcript's dedup pass now collapses the
+    resulting duplicate-text lines unconditionally -- see
+    _dedup_consecutive_duplicates for why.
+    """
     words = [
         {"text": "Hi ", "labels": ["Local"]},
         {"text": "there ", "labels": ["Local", "Speaker 0"]},
@@ -125,7 +130,7 @@ def test_render_transcript_overlap_is_separate_lines_same_text():
 
     text = _render_transcript(words)
 
-    assert text == "Local: Hi\nLocal: there\nSpeaker 0: there\nSpeaker None: gap"
+    assert text == "Local: Hi\nLocal: there\nSpeaker None: gap"
 
 
 # -- dedup consecutive identical text (overlap artifact fix) -----------------
@@ -176,20 +181,20 @@ def test_dedup_consecutive_duplicates_handles_chain_of_three_echoes():
     assert result == "A: X\nA: Y"
 
 
-def test_dedup_consecutive_duplicates_keeps_genuine_overlap_without_resumption():
-    """Duplicate not followed by the original speaker resuming → treated as real overlap."""
+def test_dedup_consecutive_duplicates_drops_echo_even_without_resumption():
+    """An echo is dropped even if the *other* (not original) speaker continues --
+    two speakers independently saying the same phrase at once isn't a plausible
+    coincidence, so it's treated as a bleed-through artifact regardless of who
+    continues or how short the echo is.
+    """
     transcript = "A: X\nB: X\nB: Y"
 
     result = _dedup_consecutive_duplicates(transcript)
 
-    assert result == transcript
+    assert result == "A: X\nB: Y"
 
 
-def test_dedup_consecutive_duplicates_drops_substantial_echo_even_without_resumption():
-    """A multi-word echo is dropped even if the *other* speaker continues --
-    two speakers coincidentally saying the same multi-word phrase at once isn't
-    plausible, so it's treated as a bleed-through artifact either way.
-    """
+def test_dedup_consecutive_duplicates_drops_multiword_echo_even_without_resumption():
     transcript = (
         "Local: No worries, I just got\n"
         "Speaker 0: No worries, I just got\n"
@@ -201,15 +206,13 @@ def test_dedup_consecutive_duplicates_drops_substantial_echo_even_without_resump
     assert result == "Local: No worries, I just got\nSpeaker 0: a meeting. So,"
 
 
-def test_dedup_consecutive_duplicates_keeps_short_echo_without_resumption():
-    """A short (1-2 word) echo without the original speaker resuming is kept --
-    still treated as plausible genuine backchanneling, not an artifact.
-    """
+def test_dedup_consecutive_duplicates_drops_short_echo_without_resumption():
+    """Even a short (1-2 word) echo is now dropped unconditionally."""
     transcript = "Local: so get\nSpeaker 0: so get\nSpeaker 0: your rest man"
 
     result = _dedup_consecutive_duplicates(transcript)
 
-    assert result == transcript
+    assert result == "Local: so get\nSpeaker 0: your rest man"
 
 
 def test_is_near_duplicate_matches_minor_punctuation_differences():
