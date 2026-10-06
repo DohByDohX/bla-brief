@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Short acknowledgments ("Okay", "Yeah", single words) on the mic channel were
+  rendering as `Speaker None` instead of `Local:`. Root cause: the VAD
+  min-segment filter (`DIARIZE_MIN_SEGMENT_S`, protecting the ECAPA embedder
+  from unreliable short-duration embeddings) was being applied to the mic
+  channel too, even though mic segments are labeled directly and never go
+  through embedding. The filter is now scoped to only the
+  embed-and-cluster path (system/loopback channel and the single-track
+  fallback); the mic channel keeps every VAD-detected segment regardless of
+  length.
 - The diarization duplicate-rendering fix above only caught verbatim text
   matches. Extended it to near-duplicates: Whisper sometimes transcribes the
   echoed fragment with slightly different trailing punctuation (e.g. "a bit."

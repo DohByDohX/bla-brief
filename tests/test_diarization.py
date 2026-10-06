@@ -14,9 +14,12 @@ import numpy as np
 import pytest
 
 from meeting_recorder import diarization
+from meeting_recorder.config import DIARIZE_MIN_SEGMENT_S
 from meeting_recorder.diarization import (
     _assign_word_labels,
     _dedup_consecutive_duplicates,
+    _diarize_channel_aware,
+    _diarize_single_track,
     _is_near_duplicate,
     _render_transcript,
     _SpeechSegment,
@@ -251,3 +254,52 @@ def test_transcribe_with_speakers_channel_aware(tmp_path: Path, monkeypatch):
     # The system segment (0.0-0.5 raw) is shifted +1.0s to 1.0-1.5 in the
     # mixed timeline, so "world." (at 1.2-1.5) lands on Speaker 0, not Local.
     assert result.text == "Local: Hello\nSpeaker 0: world."
+
+
+# -- min-segment filtering (mic channel keeps short slivers, system doesn't) -
+
+
+def test_diarize_single_track_drops_segments_shorter_than_min_segment(monkeypatch):
+    """System-channel path still filters slivers too short to embed reliably."""
+    short = _SpeechSegment(start=0.0, end=DIARIZE_MIN_SEGMENT_S / 2)
+    long = _SpeechSegment(start=1.0, end=1.0 + DIARIZE_MIN_SEGMENT_S)
+    monkeypatch.setattr(diarization, "_run_vad", lambda audio: [short, long])
+    monkeypatch.setattr(diarization, "_load_embedder", lambda: object())
+    monkeypatch.setattr(diarization, "_embed_segments", lambda *a, **k: np.zeros((1, 4)))
+    monkeypatch.setattr(diarization, "_cluster", lambda embeddings: np.array([0]))
+
+    segments = _diarize_single_track(np.zeros(1))
+
+    assert segments == [long]
+    assert segments[0].label == "Speaker 0"
+
+
+def test_diarize_channel_aware_keeps_short_mic_segments(tmp_path: Path, monkeypatch):
+    """Mic channel is labeled directly, so it keeps slivers the system channel
+    would drop -- fixes short acknowledgments ("Okay", "Yeah") rendering as
+    Speaker None.
+    """
+    mic = tmp_path / "mic.wav"
+    sys = tmp_path / "sys.wav"
+    for p in (mic, sys):
+        p.write_bytes(b"\0")
+
+    audio_by_path = {str(mic): np.zeros(16000), str(sys): np.zeros(16000)}
+    monkeypatch.setattr("faster_whisper.audio.decode_audio", lambda path, **k: audio_by_path[path])
+
+    short_mic_segment = _SpeechSegment(start=0.0, end=DIARIZE_MIN_SEGMENT_S / 2)
+
+    def fake_run_vad(audio: np.ndarray) -> list[_SpeechSegment]:
+        return [short_mic_segment]  # same fake segment for both tracks here
+
+    monkeypatch.setattr(diarization, "_run_vad", fake_run_vad)
+    monkeypatch.setattr(diarization, "_load_embedder", lambda: object())
+    monkeypatch.setattr(diarization, "_embed_segments", lambda *a, **k: np.zeros((1, 4)))
+    monkeypatch.setattr(diarization, "_cluster", lambda embeddings: np.array([0]))
+
+    segments = _diarize_channel_aware(mic, sys)
+
+    mic_labels = [s.label for s in segments if s.label == "Local"]
+    assert mic_labels == ["Local"]  # short mic segment survived and was labeled
+    sys_labels = [s.label for s in segments if s.label != "Local"]
+    assert sys_labels == []  # equally short system segment was still dropped
