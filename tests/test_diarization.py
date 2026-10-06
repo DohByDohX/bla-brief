@@ -185,6 +185,33 @@ def test_dedup_consecutive_duplicates_keeps_genuine_overlap_without_resumption()
     assert result == transcript
 
 
+def test_dedup_consecutive_duplicates_drops_substantial_echo_even_without_resumption():
+    """A multi-word echo is dropped even if the *other* speaker continues --
+    two speakers coincidentally saying the same multi-word phrase at once isn't
+    plausible, so it's treated as a bleed-through artifact either way.
+    """
+    transcript = (
+        "Local: No worries, I just got\n"
+        "Speaker 0: No worries, I just got\n"
+        "Speaker 0: a meeting. So,"
+    )
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == "Local: No worries, I just got\nSpeaker 0: a meeting. So,"
+
+
+def test_dedup_consecutive_duplicates_keeps_short_echo_without_resumption():
+    """A short (1-2 word) echo without the original speaker resuming is kept --
+    still treated as plausible genuine backchanneling, not an artifact.
+    """
+    transcript = "Local: so get\nSpeaker 0: so get\nSpeaker 0: your rest man"
+
+    result = _dedup_consecutive_duplicates(transcript)
+
+    assert result == transcript
+
+
 def test_is_near_duplicate_matches_minor_punctuation_differences():
     """Trailing punctuation noise shouldn't block a duplicate match."""
     assert _is_near_duplicate("a bit", "a bit.")
