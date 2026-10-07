@@ -208,15 +208,33 @@ def _diarize_channel_aware(mic_path: Path, sys_path: Path) -> list[_SpeechSegmen
     return mic_segments + sys_segments
 
 
+# Words farther than this from any segment stay unlabeled (often Whisper hallucinations).
+_WORD_SNAP_TOLERANCE_S = 0.5
+
+
 def _assign_word_labels(
     words: list[dict[str, Any]], segments: list[_SpeechSegment]
 ) -> list[dict[str, Any]]:
-    """Attach every label whose segment covers each word (0, 1, or more --
-    more than one means overlapping speech, e.g. mic + system both active).
+    """Attach every label whose segment covers each word's midpoint (0, 1, or
+    more -- more than one means overlapping speech, e.g. mic + system both
+    active). A word with no such segment falls back to the segment it overlaps
+    most, then to the nearest segment within ``_WORD_SNAP_TOLERANCE_S``;
+    otherwise it stays unlabeled.
     """
+    labeled = [s for s in segments if s.label]
     for word in words:
-        mid = (word["start"] + word["end"]) / 2
-        word["labels"] = [s.label for s in segments if s.start <= mid <= s.end and s.label]
+        start, end = word["start"], word["end"]
+        mid = (start + end) / 2
+        word["labels"] = [s.label for s in labeled if s.start <= mid <= s.end]
+        if word["labels"] or not labeled:
+            continue
+        best = max(labeled, key=lambda s: min(end, s.end) - max(start, s.start))
+        if min(end, best.end) - max(start, best.start) > 0:
+            word["labels"] = [best.label]
+            continue
+        nearest = min(labeled, key=lambda s: max(s.start - mid, mid - s.end))
+        if max(nearest.start - mid, mid - nearest.end) <= _WORD_SNAP_TOLERANCE_S:
+            word["labels"] = [nearest.label]
     return words
 
 

@@ -116,6 +116,61 @@ def test_assign_word_labels_handles_overlap_and_gaps():
     assert labeled[2]["labels"] == []
 
 
+def test_assign_word_labels_uses_overlap_when_midpoint_misses():
+    segments = [_SpeechSegment(start=0.0, end=1.0, label="Local")]
+    words = [{"start": 0.8, "end": 1.4, "text": "center"}]  # midpoint 1.1, outside
+
+    assert _assign_word_labels(words, segments)[0]["labels"] == ["Local"]
+
+
+def test_assign_word_labels_prefers_larger_overlap_over_nearer_edge():
+    segments = [
+        _SpeechSegment(start=0.0, end=1.0, label="Local"),
+        _SpeechSegment(start=1.15, end=2.0, label="Speaker 1"),
+    ]
+    # Overlaps Local by 0.3s and Speaker 1 by 0.05s; midpoint 1.1 is nearer Speaker 1.
+    words = [{"start": 0.7, "end": 1.2, "text": "any"}]
+
+    assert _assign_word_labels(words, segments)[0]["labels"] == ["Local"]
+
+
+def test_assign_word_labels_snaps_word_in_short_gap_to_nearest_segment():
+    segments = [
+        _SpeechSegment(start=0.0, end=1.0, label="Local"),
+        _SpeechSegment(start=2.0, end=3.0, label="Speaker 0"),
+    ]
+    words = [{"start": 1.1, "end": 1.3, "text": "is"}]  # 0.2s from Local, 0.8s from Speaker 0
+
+    assert _assign_word_labels(words, segments)[0]["labels"] == ["Local"]
+
+
+def test_assign_word_labels_leaves_far_word_unlabeled():
+    segments = [_SpeechSegment(start=0.0, end=1.0, label="Local")]
+    words = [{"start": 5.0, "end": 5.4, "text": "Thank you."}]
+
+    assert _assign_word_labels(words, segments)[0]["labels"] == []
+
+
+def test_assign_word_labels_handles_zero_duration_word_in_gap():
+    segments = [_SpeechSegment(start=0.0, end=1.0, label="Local")]
+    words = [
+        {"start": 1.2, "end": 1.2, "text": "are"},  # within tolerance
+        {"start": 1.6, "end": 1.6, "text": "going"},  # beyond tolerance
+    ]
+
+    labeled = _assign_word_labels(words, segments)
+
+    assert labeled[0]["labels"] == ["Local"]
+    assert labeled[1]["labels"] == []
+
+
+def test_assign_word_labels_ignores_unlabeled_segments():
+    segments = [_SpeechSegment(start=0.0, end=1.0)]
+    words = [{"start": 0.2, "end": 0.4, "text": "hi"}]
+
+    assert _assign_word_labels(words, segments)[0]["labels"] == []
+
+
 def test_render_transcript_overlap_collapses_to_one_line_per_dedup():
     """_assign_word_labels can mark a word as active under two labels at once
     (true overlap), but _render_transcript's dedup pass now collapses the
