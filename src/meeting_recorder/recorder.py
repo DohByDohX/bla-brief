@@ -251,7 +251,10 @@ class StreamingDualRecorder:
 
         # 1. Start silence keepalive (so loopback has data).
         self._start_silence_keepalive()
-        time.sleep(0.2)
+        # Give the output stream time to start before opening input streams,
+        # since a Bluetooth mic can trigger a profile switch that briefly
+        # invalidates the loopback device.
+        time.sleep(1)
 
         # 2. Open BOTH input streams with callbacks (non-blocking, synchronized).
         self._mic_stream = self._pa.open(
