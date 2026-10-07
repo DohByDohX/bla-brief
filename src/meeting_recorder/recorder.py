@@ -204,9 +204,10 @@ class StreamingDualRecorder:
 
         # Determine mic native rate and channels.
         self._mic_native_rate = int(self._mic_info["defaultSampleRate"])
-        self._mic_channels = self._mic_info["maxInputChannels"]
-        if self._mic_channels < 1:
-            self._mic_channels = 1
+        mic_channels = int(self._mic_info["maxInputChannels"])
+        if mic_channels < 1:
+            mic_channels = 1
+        self._mic_channels = mic_channels
 
         # Capture each source at its device's native sample rate so neither
         # track is pitch-shifted / wrong-speed. The loopback device may not
