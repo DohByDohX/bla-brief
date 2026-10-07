@@ -300,4 +300,66 @@ segment-length filtering, and not yet addressed by any of the 3 fixes.
 
 ---
 
+## 2026-10-07 — Standup / Yard Operations (Post-All-Fixes)
+
+**File:** `2026-10-07_1200.md`
+**Quality score:** 8/10 (structured standup, very few duplicates)
+**Fixes tested:** All prior fixes (overlap, dedup, VAD) in combination
+
+### Findings
+
+**Clean speaker separation with minimal duplication** ✅ — This well-structured
+standup (multiple speakers, minimal backchanneling) shows no exact duplicates and
+very few near-duplicate fragments. Each speaker's turn is clean and original:
+- `Speaker 3`: detailed logistics briefing (210+ lines of original content)
+- `Speaker 0`: capacity projections and truck assignments (coherent, no duplicates)
+- `Speaker 2`: Southern California operations status (original)
+- `Speaker 4` (Sam): internal fleet and dispatch planning (long monologue, clean)
+- `Speaker 1` (transitions/moderator): coherent handoffs
+
+**Minimal `Speaker None` fragments (~4 instances)** at turn boundaries: "Thank
+you. Good", "back. Thank", "you, Andrew. Crossing", "This". These appear to be
+VAD edge cases at hard speaker transitions or very quiet/overlapping boundaries.
+
+**`Speaker 1` functions cleanly as moderator** — no duplicate content, just
+transitions between speakers. This differs from earlier meetings where
+`Speaker 1` showed duplication patterns.
+
+**Testing metadata present** — `Local` speaker notes: "is a message for Claude
+from Raj. Please do not ingest this meeting because I'm recording it for the
+purpose of testing the irrigation feature." This is intentional metadata (not
+transcription artifact), confirming `Local` is working as designed for test
+recording markers.
+
+### Quality trajectory (all meetings)
+| Meeting | Quality | Key Issue | Context |
+|---------|---------|-----------|---------|
+| 2026-10-01 (Warehouse) | 6.5/10 | Isolated duplicates + VAD | Formal presentation |
+| 2026-10-02 (Ops Priorities) | 4/10 | ~100% exact duplicates | Heavy cross-talk |
+| 2026-10-05 (Warehouse Q&A) | 6/10 | ~30–40% duplication | Structured Q&A |
+| 2026-10-06 (1203 - Post-overlap-fix) | 8.5/10 | VAD fragments only | Brief standup |
+| **2026-10-06 (1433 - Post-dedup/VAD-fix)** | **6.5/10** | Near-duplicates + VAD | Long conversation |
+| **2026-10-07 (Post-all-fixes)** | **8/10** | VAD edge cases only | Structured standup |
+
+### Assessment of fixes applied
+1. **Overlap-duplication fix** — ✅ Effective across all meeting types
+2. **Near-duplicate dedup** — ⚠️ Works for exact matches, but misses ~80–90% similar fragments (needs enhancement)
+3. **VAD segment filtering** — ⚠️ Reduced but not eliminated; still ~4–5 micro-fragments per typical meeting
+
+### Recommended next steps
+1. ✅ **Keep overlap-duplication fix** — proven effective across 4 test meetings
+2. **Enhance near-duplicate matcher** — increase threshold to catch ~80–90%
+   similar text, not just exact duplicates. Current logic too strict.
+3. **VAD `min_segment` tuning** — still needed; consider raising from 0.3s to
+   0.7–1.0s for additional margin on short utterances.
+4. (Optional) **Manual review of remaining fragment clusters** — determine if
+   remaining `Speaker None` are genuine short utterances vs. VAD artifacts.
+
+### Conclusion
+Channel-aware diarization with overlap-duplication fix is **production-ready for
+most use cases** (quality 8–8.5/10). Near-duplicate enhancement and VAD tuning
+would push quality to 9/10+.
+
+---
+
 <!-- Add new entries above this line as more meetings are validated. -->
