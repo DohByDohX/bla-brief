@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.9.0] - 2026-10-07
+
 ### Fixed
+- Words falling in short VAD gaps between speech segments rendered as
+  `Speaker None`. A word whose midpoint misses every segment now takes the
+  label of the segment it overlaps most, else the nearest segment within
+  0.5s; words farther away stay unlabeled (often Whisper hallucinations in
+  silence). Removed ~96% of `Speaker None` lines across the validation set
+  (see `docs/diarization-validation.md`).
+- Keepalive settle delay raised from 0.2s to 1s before opening input streams,
+  reducing a race where a Bluetooth mic's profile switch briefly invalidated
+  the loopback device.
 - Echoes across speaker boundaries (e.g. `Local: No worries, I just got` /
   `Speaker 0: No worries, I just got`) were surviving dedup when the *other*
   speaker (not the original) continued afterward -- our heuristic treated

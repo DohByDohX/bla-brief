@@ -6,6 +6,12 @@ issues and recommended fixes based on manual review of a recorded meeting's
 transcript. Content/topic of meetings is not relevant here — only
 transcription and speaker-attribution quality.
 
+> **Status (v4.9.0):** Earlier entries recommend raising `DIARIZE_MIN_SEGMENT_S`
+> and loosening the near-duplicate matcher. Both are **superseded** — see the
+> 2026-10-06 (1433) *Correction* section and the *Commit 9d0bf75* section at
+> the end. The `Speaker None` root cause was word-to-segment labelling, not
+> segment length or fuzzy matching.
+
 ---
 
 ## 2026-10-01 — Optimus warehouse headcount (Nakul)
@@ -348,10 +354,10 @@ recording markers.
 
 ### Recommended next steps
 1. ✅ **Keep overlap-duplication fix** — proven effective across 4 test meetings
-2. **Enhance near-duplicate matcher** — increase threshold to catch ~80–90%
-   similar text, not just exact duplicates. Current logic too strict.
-3. **VAD `min_segment` tuning** — still needed; consider raising from 0.3s to
-   0.7–1.0s for additional margin on short utterances.
+2. ~~**Enhance near-duplicate matcher**~~ — superseded; see the 2026-10-06
+   (1433) Correction section.
+3. ~~**VAD `min_segment` tuning**~~ — superseded; resolved by commit 9d0bf75
+   (word labelling), see below.
 4. (Optional) **Manual review of remaining fragment clusters** — determine if
    remaining `Speaker None` are genuine short utterances vs. VAD artifacts.
 
@@ -370,10 +376,11 @@ would push quality to 9/10+.
 
 ### Mechanism
 
-Instead of labeling words with no active speaker as `"Speaker None"`, the new
-logic assigns them to the speaker label that was most recently or most imminently
-active in the neighborhood. This handles VAD inter-segment gaps (brief pauses
-misinterpreted as silence) by bridging them to the adjacent labeled context.
+A word whose midpoint misses every speech segment now takes the label of the
+segment it overlaps most, else the nearest segment within 0.5s. Words farther
+away stay unlabeled (often Whisper hallucinations in silence). This bridges
+VAD inter-segment gaps (brief pauses misread as silence) to the adjacent
+labeled context.
 
 ### Results
 
@@ -408,7 +415,7 @@ misinterpreted as silence) by bridging them to the adjacent labeled context.
 
 With commit 9d0bf75, all major defects are resolved:
 1. ✅ Overlap-duplication fix (commit a1d0204)
-2. ✅ Near-duplicate dedup (commit fa2a10d)
+2. ✅ Echo/near-duplicate dedup (commits 84496a6, fa2a10d, b0b5549)
 3. ✅ Word labeling / `Speaker None` elimination (commit 9d0bf75)
 
 The system now produces transcripts with:
@@ -416,6 +423,10 @@ The system now produces transcripts with:
 - Minimal fragmentation (>96% reduction in `Speaker None`)
 - Coherent turn boundaries
 - Proper mic/system channel distinction
+
+**Known limitation:** acoustic bleed when a remote participant uses speakers
+instead of a headset can still produce occasional echoed or misattributed
+lines.
 
 **Remaining opportunities (optional polish):**
 - Speaker name mapping / real speaker identification

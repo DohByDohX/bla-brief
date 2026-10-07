@@ -16,7 +16,8 @@ tracks, then produces a normalized **mixed** file suitable for transcription.
   single finished file.
 - **Built-in transcription** (optional): after recording, the mixed file is
   transcribed locally with faster-whisper into a speaker-labeled Markdown
-  transcript (`Speaker 0:`, `Speaker 1:`, ...) — no external app or
+  transcript (`Local:` for you, `Speaker 0:`, `Speaker 1:`, ... for remote
+  participants) — no external app or
   background service. Runs **fully offline** (see below).
 
 ## Requirements
@@ -62,7 +63,7 @@ locally into a speaker-labeled Markdown file, and (optionally) a downstream
 catch-up automation is fired. Nothing runs in the background between
 meetings — the models load, transcribe, and exit with the recorder.
 
-Speaker labels (`Speaker 0:`, `Speaker 1:`, ...) come from an ungated
+Remote speaker labels (`Speaker 0:`, `Speaker 1:`, ...) come from an ungated
 SpeechBrain ECAPA voice-embedding model clustering the audio into distinct
 speakers, merged with Whisper's word timestamps. They are not real names, and
 the clustering is a best-effort estimate, not guaranteed-accurate attribution.
