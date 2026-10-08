@@ -64,7 +64,17 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def print_banner(version: str) -> None:
-    """Print the minimalistic banner: a red rule + title + dim subtitle."""
+    """Print the minimalistic banner: a red rule + title + dim subtitle.
+
+    Falls back to plain text when stdout isn't a real terminal: the styled
+    rule uses a box-drawing character that crashes Rich's legacy Windows
+    console renderer under the default (non-UTF-8) console codepage.
+    """
+    if not supports_ui():
+        console.print(f"\n  MEETING RECORDER - Dual Capture   v{version}")
+        console.print("  mic + system - synchronized - streams to disk\n")
+        return
+
     console.print()
     console.rule(style="accent")
     console.print(f"  [accent]MEETING RECORDER[/accent] · Dual Capture   [dim]v{version}[/dim]")

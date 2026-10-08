@@ -29,7 +29,12 @@ import pytest
 pytestmark = pytest.mark.integration
 
 PYTHON = sys.executable
-RECORDER_CMD = [PYTHON, "-m", "meeting_recorder"]
+# --no-transcribe: these tests validate capture/mixdown only (transcription is
+# covered by test_transcription.py/test_diarization.py). Without this flag,
+# every subprocess would transcribe against the *real* TRANSCRIPT_DIR and fire
+# the *real* catch-up automation, and the extra 5-45s of STT/diarization blows
+# past these tests' communicate() timeouts.
+RECORDER_CMD = [PYTHON, "-m", "meeting_recorder", "--no-transcribe"]
 TEST_DIR = Path(r"C:\Users\pchavan\AppData\Local\Temp\opencode\qa_tests")
 
 
