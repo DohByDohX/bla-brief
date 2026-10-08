@@ -6,17 +6,19 @@ import argparse
 import re
 from pathlib import Path
 
+import pytest
 from support import write_sine_wav
 
-from meeting_recorder import cli, transcription
+from meeting_recorder import cli, diarization, transcription
 from meeting_recorder.cli import (
     ALL_OUTPUTS,
+    _limit_reached,
     _parse_args,
     _produce_outputs,
+    _prune_unkept_tracks,
     _rename_recording,
     _transcribe_recording,
     build_paths,
-    parse_output_choice,
     sanitize_name,
 )
 
@@ -67,27 +69,6 @@ def test_build_paths_custom_tracks_dir():
     assert paths.mic_path.parent == custom
 
 
-def test_parse_output_choice_empty_keeps_all():
-    assert parse_output_choice("") == set(ALL_OUTPUTS)
-    assert parse_output_choice("   ") == set(ALL_OUTPUTS)
-
-
-def test_parse_output_choice_letters():
-    assert parse_output_choice("m") == {"mixed"}
-    assert parse_output_choice("v") == {"mic"}
-    assert parse_output_choice("s") == {"system"}
-
-
-def test_parse_output_choice_multi_and_words():
-    assert parse_output_choice("m, v") == {"mixed", "mic"}
-    assert parse_output_choice("voice system") == {"mic", "system"}
-    assert parse_output_choice("mixed,mic,system") == set(ALL_OUTPUTS)
-
-
-def test_parse_output_choice_unknown_falls_back_to_all():
-    assert parse_output_choice("xyz") == set(ALL_OUTPUTS)
-
-
 def test_rename_recording_renames_tracks_and_returns_named_paths(tmp_path: Path):
     out = tmp_path / "Recordings"
     out.mkdir()
@@ -125,7 +106,8 @@ def _paths_with_tracks(tmp_path: Path, *, mic_s: float, sys_s: float):
 
 def test_produce_outputs_mixed_only_prunes_raw_tracks(tmp_path: Path):
     paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
-    _produce_outputs(paths, _args(), keep={"mixed"})
+    keep_mic, keep_sys = _produce_outputs(paths, _args(), keep={"mixed"})
+    _prune_unkept_tracks(paths, keep_mic, keep_sys, keep_audio=False)
 
     # Only the published mixed file survives; the raw tracks are removed.
     assert paths.mixed_final.exists()
@@ -155,7 +137,8 @@ def test_produce_outputs_keeps_usable_track_when_mix_impossible(tmp_path: Path):
 
 def test_produce_outputs_discard_tracks_forces_mixed_only(tmp_path: Path):
     paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
-    _produce_outputs(paths, _args(discard_tracks=True), keep=set(ALL_OUTPUTS))
+    keep_mic, keep_sys = _produce_outputs(paths, _args(discard_tracks=True), keep=set(ALL_OUTPUTS))
+    _prune_unkept_tracks(paths, keep_mic, keep_sys, keep_audio=False)
 
     assert paths.mixed_final.exists()
     assert not paths.mic_path.exists()
@@ -181,13 +164,46 @@ def test_parse_args_download_model_default_false():
     assert _parse_args(["--download-model"]).download_model is True
 
 
+def test_parse_args_stt_model_defaults_to_small_en():
+    assert _parse_args([]).stt_model == "small.en"
+    assert _parse_args(["--stt-model", "medium.en"]).stt_model == "medium.en"
+
+
+# -- Max duration (forgotten-to-stop safety net) -----------------------------
+
+
+def test_parse_args_max_duration_defaults_to_two_hours():
+    assert _parse_args([]).max_duration == 120
+
+
+def test_parse_args_max_duration_override_and_disable():
+    assert _parse_args(["--max-duration", "90"]).max_duration == 90
+    assert _parse_args(["--max-duration", "0"]).max_duration == 0
+
+
+def test_parse_args_max_duration_rejects_negative():
+    with pytest.raises(SystemExit):
+        _parse_args(["--max-duration", "-1"])
+
+
+def test_limit_reached_disabled_when_zero():
+    assert _limit_reached(10_000, 0) is False
+
+
+def test_limit_reached_at_boundary():
+    # 120 min = 7200s. Just under does not fire; exact and over do.
+    assert _limit_reached(7199.9, 120) is False
+    assert _limit_reached(7200.0, 120) is True
+    assert _limit_reached(7200.1, 120) is True
+
+
 def test_main_download_model_exits_without_recording(monkeypatch):
     called: dict[str, object] = {}
     monkeypatch.setattr(cli.transcription, "download_model", lambda m: called.setdefault("m", m))
 
     cli.main(["--download-model"])
 
-    assert called["m"] == "base.en"  # fetched the configured model, then returned
+    assert called["m"] == "small.en"  # fetched the configured model, then returned
 
 
 # -- _transcribe_recording ---------------------------------------------------
@@ -218,23 +234,43 @@ def _make_mixed(tmp_path: Path):
 def test_transcribe_writes_md_and_deletes_wav(tmp_path: Path, monkeypatch):
     paths = _make_mixed(tmp_path)
     monkeypatch.setattr(
-        transcription,
-        "transcribe_file",
+        diarization,
+        "transcribe_with_speakers",
         lambda *a, **k: transcription.TranscriptionResult("Hello team.", "en", 1.0, "cpu"),
     )
 
-    _transcribe_recording(paths, _stt_args(tmp_path))
+    ok = _transcribe_recording(paths, _stt_args(tmp_path))
 
     md = Path(tmp_path / "Raw" / f"{paths.mixed_final.stem}.md")
     assert md.read_text(encoding="utf-8") == "Hello team.\n"
     assert not paths.mixed_final.exists()  # wav removed after success
+    assert ok is True
+
+
+def test_transcribe_passes_mic_and_system_paths_for_channel_aware_diarization(
+    tmp_path: Path, monkeypatch
+):
+    paths = _make_mixed(tmp_path)
+    calls: dict[str, object] = {}
+
+    def fake_transcribe(wav_path, *, mic_path=None, sys_path=None, **_k):
+        calls["mic_path"] = mic_path
+        calls["sys_path"] = sys_path
+        return transcription.TranscriptionResult("Hi.", "en", 1.0, "cpu")
+
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", fake_transcribe)
+
+    _transcribe_recording(paths, _stt_args(tmp_path))
+
+    assert calls["mic_path"] == paths.mic_path
+    assert calls["sys_path"] == paths.sys_path
 
 
 def test_transcribe_keep_audio_retains_wav(tmp_path: Path, monkeypatch):
     paths = _make_mixed(tmp_path)
     monkeypatch.setattr(
-        transcription,
-        "transcribe_file",
+        diarization,
+        "transcribe_with_speakers",
         lambda *a, **k: transcription.TranscriptionResult("kept.", "en", 1.0, "cpu"),
     )
 
@@ -249,19 +285,20 @@ def test_transcribe_failure_keeps_wav_and_writes_nothing(tmp_path: Path, monkeyp
     def boom(*_a, **_k):
         raise RuntimeError("engine down")
 
-    monkeypatch.setattr(transcription, "transcribe_file", boom)
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", boom)
 
-    _transcribe_recording(paths, _stt_args(tmp_path))
+    ok = _transcribe_recording(paths, _stt_args(tmp_path))
 
     assert paths.mixed_final.exists()  # never lose audio on failure
     assert not (tmp_path / "Raw").exists() or list((tmp_path / "Raw").glob("*.md")) == []
+    assert ok is False
 
 
 def test_transcribe_empty_text_keeps_wav_and_writes_nothing(tmp_path: Path, monkeypatch):
     paths = _make_mixed(tmp_path)
     monkeypatch.setattr(
-        transcription,
-        "transcribe_file",
+        diarization,
+        "transcribe_with_speakers",
         lambda *a, **k: transcription.TranscriptionResult("   ", "en", 0.0, "cpu"),
     )
 
@@ -269,6 +306,15 @@ def test_transcribe_empty_text_keeps_wav_and_writes_nothing(tmp_path: Path, monk
 
     assert paths.mixed_final.exists()
     assert not (tmp_path / "Raw").exists() or list((tmp_path / "Raw").glob("*.md")) == []
+
+
+def test_prune_unkept_tracks_keep_audio_preserves_raw_tracks(tmp_path: Path):
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
+
+    _prune_unkept_tracks(paths, keep_mic=False, keep_sys=False, keep_audio=True)
+
+    assert paths.mic_path.exists()
+    assert paths.sys_path.exists()
 
 
 def test_transcribe_no_mixed_file_is_noop(tmp_path: Path, monkeypatch):
@@ -280,7 +326,7 @@ def test_transcribe_no_mixed_file_is_noop(tmp_path: Path, monkeypatch):
         called = True
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(transcription, "transcribe_file", spy)
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", spy)
 
     _transcribe_recording(paths, _stt_args(tmp_path))
 
@@ -297,8 +343,8 @@ def test_parse_args_run_automation_default_on():
 
 def _ok_transcribe(monkeypatch):
     monkeypatch.setattr(
-        transcription,
-        "transcribe_file",
+        diarization,
+        "transcribe_with_speakers",
         lambda *a, **k: transcription.TranscriptionResult("Hello.", "en", 1.0, "cpu"),
     )
 
@@ -332,7 +378,9 @@ def test_transcribe_no_automation_does_not_fire(tmp_path: Path, monkeypatch):
 def test_transcribe_failure_does_not_fire_automation(tmp_path: Path, monkeypatch):
     paths = _make_mixed(tmp_path)
     monkeypatch.setattr(
-        transcription, "transcribe_file", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+        diarization,
+        "transcribe_with_speakers",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")),
     )
     (tmp_path / "process-meetings.ps1").write_text("# stub", encoding="utf-8")
     launched: list[object] = []

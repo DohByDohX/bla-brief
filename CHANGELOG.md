@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.9.0] - 2026-10-07
+
+### Fixed
+- Words falling in short VAD gaps between speech segments rendered as
+  `Speaker None`. A word whose midpoint misses every segment now takes the
+  label of the segment it overlaps most, else the nearest segment within
+  0.5s; words farther away stay unlabeled (often Whisper hallucinations in
+  silence). Removed ~96% of `Speaker None` lines across the validation set
+  (see `docs/diarization-validation.md`).
+- Keepalive settle delay raised from 0.2s to 1s before opening input streams,
+  reducing a race where a Bluetooth mic's profile switch briefly invalidated
+  the loopback device.
+- Echoes across speaker boundaries (e.g. `Local: No worries, I just got` /
+  `Speaker 0: No worries, I just got`) were surviving dedup when the *other*
+  speaker (not the original) continued afterward -- our heuristic treated
+  that as genuine simultaneous speech. In practice this almost always turned
+  out to be the same audio bleeding into both the mic and system channels
+  rather than two people genuinely speaking in unison, including for short
+  1-2 word echoes ("yeah", "right") that were previously given the benefit of
+  the doubt. Any duplicate run is now dropped unconditionally, regardless of
+  length or which speaker continues afterward. Found via real-world testing
+  on a phone-call-style meeting (no headset) with heavy acoustic
+  bleed-through.
+- Short acknowledgments ("Okay", "Yeah", single words) on the mic channel were
+  rendering as `Speaker None` instead of `Local:`. Root cause: the VAD
+  min-segment filter (`DIARIZE_MIN_SEGMENT_S`, protecting the ECAPA embedder
+  from unreliable short-duration embeddings) was being applied to the mic
+  channel too, even though mic segments are labeled directly and never go
+  through embedding. The filter is now scoped to only the
+  embed-and-cluster path (system/loopback channel and the single-track
+  fallback); the mic channel keeps every VAD-detected segment regardless of
+  length.
+- The diarization duplicate-rendering fix above only caught verbatim text
+  matches. Extended it to near-duplicates: Whisper sometimes transcribes the
+  echoed fragment with slightly different trailing punctuation (e.g. "a bit."
+  vs "a bit,"), which a strict equality check missed. Text is now compared
+  after stripping trailing punctuation/case, with a fuzzy-ratio fallback for
+  anything that still differs, so echoed fragments are caught regardless of
+  minor transcription noise while genuinely different utterances (even short
+  ones) are left alone.
+- Overlap duplication artifact in diarization: when mic and system tracks
+  overlapped in time (during cross-talk), the same word sequence was rendered
+  twice under different speaker labels. Added post-rendering dedup step that
+  detects and removes this pattern (Speaker A says X, Speaker B says same X
+  immediately after, then A continues with different content → remove B's
+  duplicate). Preserves legitimate overlapping speech where both speakers
+  genuinely say the same thing simultaneously. This fix significantly improves
+  transcript readability in conversational meetings. Validated on 3 real
+  meeting recordings: meeting 2 quality improved from 4/10 → 7+/10,
+  meeting 3 from 6/10 → 8+/10.
+
+### Added
+- Default 2-hour auto-stop so a forgotten recording cannot run overnight.
+  Override per run with `--max-duration MINUTES`; `--max-duration 0` disables
+  the limit. A timed-out recording still mixdown + transcribes like a normal
+  ENTER stop. The live panel shows the cap (`auto-stop 02:00:00`).
+- Transcripts are now speaker-labeled (`Speaker 0:`, `Speaker 1:`, ...).
+  Diarization runs unconditionally after every recording: VAD segments the
+  audio, an ungated SpeechBrain ECAPA model embeds each segment (CPU, no
+  extra VRAM -- Whisper keeps the GPU), and the segments are clustered into
+  speakers before merging with Whisper's word timestamps. Speaker labels are
+  cluster IDs, not real names. Fetch the embedding model once with
+  `--download-model` (same offline-first, one-time-online pattern as the
+  Whisper model).
+- Diarization is now channel-aware: the mic track is a known fact (it's
+  always the local speaker), so it's labeled directly as `Local:` with no
+  embedding/clustering needed, and only the system/loopback track is
+  clustered -- so clustering only ever has to tell remote participants apart
+  from each other. The raw mic/system tracks are now kept until after
+  transcription (previously pruned right after mixdown) so diarization can
+  use them; they're deleted afterward unless `--keep-audio` is set (which now
+  means "keep all audio", not just the mixed file). Overlapping mic+system
+  speech renders as separate lines, one per active speaker, since there is
+  only one transcribed word stream to attribute.
+
+### Changed
+- Default transcription model is now `small.en` (was `base.en`). Override
+  per run with `--stt-model`. Fetch it once with `--download-model`.
+- Recordings now always keep only the mixed file. The post-recording
+  `keep [m]ixed [v]oice [s]ystem` prompt is gone, and mixed-only is the default
+  for interactive and non-interactive runs alike. The raw mic/system tracks are
+  pruned after mixdown (the empty-track fallback still preserves the one usable
+  track when a mix isn't possible).
+
 ## [4.4.0] - 2026-07-18
 
 ### Added

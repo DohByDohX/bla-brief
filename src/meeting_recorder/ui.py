@@ -157,8 +157,9 @@ def _bar(fill: float, width: int = 18) -> Text:
 class RecordingView:
     """Live, in-place recording panel (falls back to a single line off-TTY)."""
 
-    def __init__(self, device_line: str) -> None:
+    def __init__(self, device_line: str, auto_stop_label: str | None = None) -> None:
         self._device_line = device_line
+        self._auto_stop_label = auto_stop_label
         self._live: Live | None = None
         self._pulse = False
 
@@ -174,7 +175,10 @@ class RecordingView:
             )
             self._live.__enter__()
         else:
-            print("  RECORDING... Press ENTER to stop.\n")
+            hint = "  RECORDING... Press ENTER to stop."
+            if self._auto_stop_label:
+                hint += f" Auto-stop at {self._auto_stop_label}."
+            print(hint + "\n")
         return self
 
     def update(self, timer: str, mic_mb: float, sys_mb: float) -> None:
@@ -212,13 +216,16 @@ class RecordingView:
         meters.add_row("[dim]sys[/dim]", _bar(sys_mb / peak), f"{sys_mb:5.1f} MB")
 
         body = Group(header, Text(""), meters, Text(""), Text(self._device_line, style="dim"))
+        subtitle = "press ENTER to stop"
+        if self._auto_stop_label:
+            subtitle += f" · auto-stop {self._auto_stop_label}"
         return Panel(
             body,
             border_style="dim",
             box=box.ROUNDED,
             padding=(0, 1),
             width=LIVE_WIDTH,
-            subtitle="[dim]press ENTER to stop[/dim]",
+            subtitle=f"[dim]{subtitle}[/dim]",
             subtitle_align="right",
         )
 
