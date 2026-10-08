@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -114,6 +115,16 @@ def test_produce_outputs_mixed_only_prunes_raw_tracks(tmp_path: Path):
     assert not paths.mic_path.exists()
     assert not paths.sys_path.exists()
     assert not paths.mixed_tmp.exists()  # no stray .part left behind
+
+
+def test_produce_outputs_creates_missing_output_dir(tmp_path: Path):
+    # output_dir itself may not exist yet (e.g. a custom --output-dir); the
+    # mixed file's parent must be created before mixdown, not just after.
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
+    shutil.rmtree(paths.mixed_final.parent)
+
+    _produce_outputs(paths, _args(), keep={"mixed"})
+    assert paths.mixed_final.exists()
 
 
 def test_produce_outputs_keep_all_retains_every_file(tmp_path: Path):

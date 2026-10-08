@@ -353,6 +353,7 @@ def _produce_outputs(
     mixed_made = False
     if want_mixed and mic_ok and sys_ok:
         log.info("Creating mixed file...")
+        paths.mixed_tmp.parent.mkdir(parents=True, exist_ok=True)
         if create_mixed_file(
             paths.mic_path,
             paths.sys_path,
