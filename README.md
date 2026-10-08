@@ -105,6 +105,9 @@ run with `--transcript-dir`. On success the mixed `.wav` and the raw
 mic/system tracks are deleted (keep all of them with `--keep-audio`); on any
 failure all the audio is preserved.
 
+See [docs/runbook.md](docs/runbook.md) for setup/troubleshooting on a new
+machine and measured STT latency (GPU vs CPU).
+
 ## Project layout
 
 ```
