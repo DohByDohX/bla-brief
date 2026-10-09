@@ -258,23 +258,21 @@ def test_transcribe_writes_md_and_deletes_wav(tmp_path: Path, monkeypatch):
     assert ok is True
 
 
-def test_transcribe_passes_mic_and_system_paths_for_channel_aware_diarization(
-    tmp_path: Path, monkeypatch
-):
+def test_transcribe_does_not_pass_mic_and_system_paths(tmp_path: Path, monkeypatch):
+    """Diarization is single-track only; the raw tracks must never be passed in."""
     paths = _make_mixed(tmp_path)
     calls: dict[str, object] = {}
 
-    def fake_transcribe(wav_path, *, mic_path=None, sys_path=None, **_k):
-        calls["mic_path"] = mic_path
-        calls["sys_path"] = sys_path
+    def fake_transcribe(wav_path, **kwargs):
+        calls["kwargs"] = kwargs
         return transcription.TranscriptionResult("Hi.", "en", 1.0, "cpu")
 
     monkeypatch.setattr(diarization, "transcribe_with_speakers", fake_transcribe)
 
     _transcribe_recording(paths, _stt_args(tmp_path))
 
-    assert calls["mic_path"] == paths.mic_path
-    assert calls["sys_path"] == paths.sys_path
+    assert "mic_path" not in calls["kwargs"]
+    assert "sys_path" not in calls["kwargs"]
 
 
 def test_transcribe_keep_audio_retains_wav(tmp_path: Path, monkeypatch):

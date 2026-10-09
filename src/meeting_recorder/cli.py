@@ -434,8 +434,6 @@ def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> bo
             model=args.stt_model,
             device=args.stt_device,
             language=args.stt_language,
-            mic_path=paths.mic_path,
-            sys_path=paths.sys_path,
         )
     except Exception as exc:  # noqa: BLE001 - never lose audio to a transcription error
         log.error("Transcription failed (%s); keeping the audio file.", exc)
@@ -519,9 +517,8 @@ def _finalize(
             )
 
     # Only the mixed file is meant to survive long-term; the raw mic/system
-    # tracks are kept just long enough for channel-aware diarization to use
-    # them (see _transcribe_recording), then pruned below (the empty-track
-    # fallback in _produce_outputs still applies).
+    # tracks are kept around only for the empty-track fallback in
+    # _produce_outputs, then pruned below once transcription's outcome is known.
     keep_mic, keep_sys = _produce_outputs(paths, args, keep={"mixed"})
 
     transcribed_ok = True

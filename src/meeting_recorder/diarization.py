@@ -4,23 +4,16 @@ Pipeline: VAD (faster-whisper's bundled Silero) -> ECAPA speaker embeddings
 (SpeechBrain, CPU, ungated -- no license form) -> agglomerative clustering ->
 merge with Whisper's word timestamps. Runs unconditionally as part of every
 recording (see ``cli._transcribe_recording``); there is no plain, undiarized
-transcription path anymore.
-
-Channel-aware mode (when the raw mic/system tracks are available): the mic
-track is a known fact -- every segment on it is labeled directly as the local
-speaker, no embedding/clustering needed -- and only the system/loopback
-track is clustered, so it only ever has to tell remote participants apart
-from each other. Falls back to single-track clustering on the mixed file
-when the raw tracks aren't available.
+transcription path anymore. Always clusters the single mixed-file audio
+stream -- there is no channel-aware mode.
 
 OFFLINE-FIRST: normal runs make no network calls (same guarantee as
 ``transcription.py``). The one-time model fetch is :func:`download_embedder`,
 called from ``transcription.download_model`` (the ``--download-model`` flag).
 
-Speaker labels are just cluster IDs ("Speaker 0", "Speaker 1", ...) or the
-fixed local-speaker label, not real names, and the clustering threshold is
-calibrated on a small number of recordings -- treat the speaker count as a
-best-effort estimate.
+Speaker labels are just cluster IDs ("Speaker 0", "Speaker 1", ...), not real
+names, and the clustering threshold is calibrated on a small number of
+recordings -- treat the speaker count as a best-effort estimate.
 """
 
 from __future__ import annotations
@@ -39,11 +32,9 @@ import numpy as np
 from meeting_recorder.config import (
     DIARIZE_CACHE_DIR,
     DIARIZE_CLUSTER_THRESHOLD,
-    DIARIZE_LOCAL_SPEAKER_LABEL,
     DIARIZE_MIN_SEGMENT_S,
     DIARIZE_MODEL,
 )
-from meeting_recorder.mixing import resolve_alignment_offset_s
 from meeting_recorder.transcription import (
     _DEVICE_COMPUTE,
     TranscriptionResult,
@@ -169,43 +160,6 @@ def _diarize_single_track(audio: np.ndarray) -> list[_SpeechSegment]:
     for seg, label in zip(segments, labels, strict=True):
         seg.label = f"Speaker {int(label)}"
     return segments
-
-
-def _diarize_channel_aware(mic_path: Path, sys_path: Path) -> list[_SpeechSegment]:
-    """Label the mic track directly (it's always the local speaker) and only
-    cluster the system/loopback track, so clustering only has to tell remote
-    participants apart from each other.
-
-    The two raw tracks can start at slightly different wall-clock times (see
-    ``mixing.create_mixed_file``); segments are shifted by the same
-    duration-based offset used to build the mixed file, so they land on the
-    mixed file's timeline (the one Whisper's word timestamps use).
-    """
-    from faster_whisper.audio import decode_audio
-
-    # split_stereo defaults to False, so this always returns a plain ndarray,
-    # never the stereo tuple variant in decode_audio's return type.
-    mic_audio = cast(np.ndarray, decode_audio(str(mic_path), sampling_rate=SAMPLE_RATE))
-    sys_audio = cast(np.ndarray, decode_audio(str(sys_path), sampling_rate=SAMPLE_RATE))
-    offset_sec = resolve_alignment_offset_s(
-        len(mic_audio) / SAMPLE_RATE, len(sys_audio) / SAMPLE_RATE, SAMPLE_RATE
-    )
-    mic_pad, sys_pad = max(0.0, -offset_sec), max(0.0, offset_sec)
-
-    # No min-segment filter here: the mic channel is labeled directly with no
-    # embedding step, so even a one-word "okay" segment is safe to keep.
-    mic_segments = _run_vad(mic_audio)
-    for seg in mic_segments:
-        seg.start += mic_pad
-        seg.end += mic_pad
-        seg.label = DIARIZE_LOCAL_SPEAKER_LABEL
-
-    sys_segments = _diarize_single_track(sys_audio)
-    for seg in sys_segments:
-        seg.start += sys_pad
-        seg.end += sys_pad
-
-    return mic_segments + sys_segments
 
 
 # Words farther than this from any segment stay unlabeled (often Whisper hallucinations).
@@ -344,14 +298,10 @@ def transcribe_with_speakers(
     model: str = "small.en",
     device: str = "auto",
     language: str = "en",
-    mic_path: Path | None = None,
-    sys_path: Path | None = None,
 ) -> TranscriptionResult:
     """Transcribe ``wav_path`` with "Speaker N: ..." labels and return it.
 
-    When ``mic_path``/``sys_path`` are given and exist, uses channel-aware
-    diarization (see :func:`_diarize_channel_aware`); otherwise clusters the
-    mixed file directly.
+    Clusters the audio directly (see :func:`_diarize_single_track`).
 
     Runs fully offline (no network); see module docstring. Raises
     ``FileNotFoundError`` if the audio is missing, or ``RuntimeError`` if no
@@ -363,13 +313,10 @@ def transcribe_with_speakers(
     _enable_offline()  # no network during a normal recording
     _register_cuda_dll_dirs()
 
-    if mic_path is not None and sys_path is not None and mic_path.exists() and sys_path.exists():
-        segments = _diarize_channel_aware(mic_path, sys_path)
-    else:
-        from faster_whisper.audio import decode_audio
+    from faster_whisper.audio import decode_audio
 
-        audio = cast(np.ndarray, decode_audio(str(wav_path), sampling_rate=SAMPLE_RATE))
-        segments = _diarize_single_track(audio)
+    audio = cast(np.ndarray, decode_audio(str(wav_path), sampling_rate=SAMPLE_RATE))
+    segments = _diarize_single_track(audio)
 
     last_error: Exception | None = None
     for dev in _candidate_devices(device):
