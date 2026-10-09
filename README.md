@@ -68,14 +68,10 @@ SpeechBrain ECAPA voice-embedding model clustering the audio into distinct
 speakers, merged with Whisper's word timestamps. They are not real names, and
 the clustering is a best-effort estimate, not guaranteed-accurate attribution.
 
-Diarization is channel-aware: the mic track is a known fact (it's always you),
-so it's labeled directly as `Local:` with no embedding/clustering needed, and
-only the system/loopback track is clustered -- so clustering only ever has to
-tell remote participants apart from each other. The raw mic/system tracks are
-kept just long enough for this (previously deleted right after mixdown), then
-removed like the mixed file. Overlapping mic+system speech renders as
-separate lines, one per active speaker, since there's only one transcribed
-word stream to attribute.
+Diarization clusters the single mixed-file audio stream directly (no
+channel-aware mic/system split). Overlapping speech renders as separate
+lines, one per active speaker, since there's only one transcribed word
+stream to attribute.
 
 **Offline-first (company-PC safe).** Normal transcription makes **zero network
 calls**: both models are read from the local cache with `HF_HUB_OFFLINE=1`

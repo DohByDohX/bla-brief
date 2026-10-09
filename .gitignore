@@ -31,6 +31,9 @@ spike/.models/
 spike/.*.cache.pkl
 spike/*.diarized.md
 
+# Scratch debugging transcripts (local only)
+.temp_transcripts/
+
 # OpenCode / Grok workspace-local artifacts (machine-specific; recreated on open)
 .opencode/openwork.json
 .opencode/openwork/
