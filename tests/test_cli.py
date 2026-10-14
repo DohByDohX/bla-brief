@@ -227,6 +227,7 @@ def _stt_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
         "stt_device": "cpu",
         "stt_language": "en",
         "keep_audio": False,
+        "diarize": True,
         "run_automation": False,
         "automation_script": str(tmp_path / "process-meetings.ps1"),
     }
@@ -407,3 +408,81 @@ def test_fire_automation_missing_script_skips(tmp_path: Path, monkeypatch):
     cli._fire_automation(tmp_path / "does-not-exist.ps1")
 
     assert launched == []
+
+
+# -- --file / --no-diarize ----------------------------------------------------
+
+
+def _fake_result(text: str = "Hello."):
+    return lambda *a, **k: transcription.TranscriptionResult(text, "en", 1.0, "cpu")
+
+
+def test_parse_args_file_and_diarize_defaults():
+    args = cli._parse_args([])
+    assert args.files is None
+    assert args.diarize is True
+    args = cli._parse_args(["--file", "a.mp3", "b.m4a", "--no-diarize"])
+    assert args.files == ["a.mp3", "b.m4a"]
+    assert args.diarize is False
+
+
+def test_collect_media_files_expands_folders_and_dedups(tmp_path: Path):
+    (tmp_path / "a.mp3").write_bytes(b"x")
+    (tmp_path / "b.MP4").write_bytes(b"x")
+    (tmp_path / "notes.txt").write_bytes(b"x")
+    explicit = tmp_path / "odd.xyz"
+    explicit.write_bytes(b"x")
+
+    got = cli.collect_media_files(
+        [str(tmp_path), str(tmp_path / "a.mp3"), str(explicit), str(tmp_path / "missing.wav")]
+    )
+
+    assert got == [tmp_path / "a.mp3", tmp_path / "b.MP4", explicit]
+
+
+def test_transcribe_files_never_deletes_source(tmp_path: Path, monkeypatch):
+    src = tmp_path / "call.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", _fake_result("Hi team."))
+
+    failed = cli._transcribe_files(_stt_args(tmp_path, files=[str(src)]))
+
+    assert failed == 0
+    assert src.exists()
+    assert (tmp_path / "Raw" / "call.md").read_text(encoding="utf-8") == "Hi team.\n"
+
+
+def test_transcribe_files_no_diarize_uses_plain_engine(tmp_path: Path, monkeypatch):
+    src = tmp_path / "memo.m4a"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(transcription, "transcribe_file", _fake_result("raw"))
+
+    def must_not_run(*_a, **_k):
+        raise AssertionError("diarization should be skipped")
+
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", must_not_run)
+
+    cli._transcribe_files(_stt_args(tmp_path, files=[str(src)], diarize=False))
+
+    assert (tmp_path / "Raw" / "memo.md").read_text(encoding="utf-8") == "raw\n"
+
+
+def test_transcribe_files_skips_existing_and_counts_failures(tmp_path: Path, monkeypatch):
+    done, bad = tmp_path / "done.wav", tmp_path / "bad.wav"
+    done.write_bytes(b"x")
+    bad.write_bytes(b"x")
+    (tmp_path / "Raw").mkdir()
+    (tmp_path / "Raw" / "done.md").write_text("old", encoding="utf-8")
+    seen: list[str] = []
+
+    def engine(path, **_k):
+        seen.append(path.name)
+        raise RuntimeError("corrupt")
+
+    monkeypatch.setattr(diarization, "transcribe_with_speakers", engine)
+
+    failed = cli._transcribe_files(_stt_args(tmp_path, files=[str(done), str(bad)]))
+
+    assert seen == ["bad.wav"]  # existing transcript skipped
+    assert failed == 1
+    assert (tmp_path / "Raw" / "done.md").read_text(encoding="utf-8") == "old"
