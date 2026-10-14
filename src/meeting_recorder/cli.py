@@ -115,7 +115,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
   meeting-recorder -n "jon-headcount"     Named recording
   meeting-recorder --mic 15               Use AirPods mic (device 15)
   meeting-recorder --mic-gain 1.3         Boost your mic volume
-  meeting-recorder -l                     List available devices""",
+  meeting-recorder -l                     List available devices
+  meeting-recorder --file call.mp4        Transcribe an existing file (never deleted)
+  meeting-recorder --file D:\\memos --no-diarize
+                                          Raw-transcribe every media file in a folder""",
     )
     parser.add_argument(
         "--name", "-n", default=None, help="Recording name (default: YYYY-MM-DD_HHMM)"
@@ -167,6 +170,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=True,
         help="Transcribe the mixed file after recording (default: on). Use --no-transcribe "
         "to skip.",
+    )
+    parser.add_argument(
+        "--diarize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Label speakers ('Speaker N: ...') in transcripts (default: on). Use "
+        "--no-diarize for a plain raw transcript.",
+    )
+    parser.add_argument(
+        "--file",
+        dest="files",
+        nargs="+",
+        default=None,
+        metavar="PATH",
+        help="Transcribe existing audio/video file(s) or folder(s) instead of recording, "
+        "then exit. Source files are never deleted; files that already have a "
+        "transcript are skipped.",
     )
     parser.add_argument(
         "--stt-model", default=STT_MODEL, help=f"Whisper model to use (default: {STT_MODEL})"
@@ -413,6 +433,76 @@ def _report_outputs(
     ui.output_summary(entries, published=published, tracks_dir=tracks_dir)
 
 
+#: Extensions picked up when a folder is passed to ``--file`` (decoded by
+#: PyAV's bundled ffmpeg, so no system ffmpeg is needed).
+MEDIA_EXTENSIONS = frozenset(
+    {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"}
+    | {".mp4", ".mkv", ".mov", ".webm", ".avi"}
+)
+
+
+def collect_media_files(paths: list[str]) -> list[Path]:
+    """Expand ``--file`` arguments into a de-duplicated, ordered file list.
+
+    Explicit files are taken as-is (the user named them, so any extension is
+    allowed); folders contribute only their top-level media files. Missing
+    paths are logged and skipped rather than aborting the whole batch.
+    """
+    found: list[Path] = []
+    for raw in paths:
+        p = Path(raw)
+        if p.is_dir():
+            found.extend(
+                sorted(
+                    c for c in p.iterdir() if c.is_file() and c.suffix.lower() in MEDIA_EXTENSIONS
+                )
+            )
+        elif p.is_file():
+            found.append(p)
+        else:
+            log.error("Not found, skipping: %s", p)
+    return list(dict.fromkeys(found))
+
+
+def _run_stt(audio: Path, args: argparse.Namespace) -> transcription.TranscriptionResult:
+    """Transcribe ``audio`` with or without speaker labels per ``--diarize``."""
+    engine = diarization.transcribe_with_speakers if args.diarize else transcription.transcribe_file
+    return engine(audio, model=args.stt_model, device=args.stt_device, language=args.stt_language)
+
+
+def _transcribe_files(args: argparse.Namespace) -> int:
+    """``--file`` mode: transcribe existing files; return the number that failed.
+
+    Unlike a recording, the source is user-owned, so it is NEVER deleted and the
+    catch-up automation is not fired.
+    """
+    files = collect_media_files(args.files)
+    if not files:
+        log.error("No audio/video files to transcribe.")
+        return 1
+
+    failed = 0
+    for i, src in enumerate(files, 1):
+        dest_md = Path(args.transcript_dir) / f"{src.stem}.md"
+        print(f"\n  [{i}/{len(files)}] {src.name}")
+        if dest_md.exists():
+            log.info("Transcript already exists (%s); skipping. Delete it to redo.", dest_md)
+            continue
+        try:
+            result = _run_stt(src, args)
+        except Exception as exc:  # noqa: BLE001 - one bad file must not stop the batch
+            log.error("Transcription failed for %s: %s", src.name, exc)
+            failed += 1
+            continue
+        if not result.text.strip():
+            log.warning("No speech recognized in %s; no transcript written.", src.name)
+            failed += 1
+            continue
+        md_path = transcription.write_transcript(result.text, dest_md)
+        print(f"  Transcript: {md_path}")
+    return failed
+
+
 def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> bool:
     """Transcribe the mixed file (with speaker labels), write the .md, and
     remove the wav on success.
@@ -429,12 +519,7 @@ def _transcribe_recording(paths: RecordingPaths, args: argparse.Namespace) -> bo
 
     dest_md = Path(args.transcript_dir) / f"{paths.mixed_final.stem}.md"
     try:
-        result = diarization.transcribe_with_speakers(
-            paths.mixed_final,
-            model=args.stt_model,
-            device=args.stt_device,
-            language=args.stt_language,
-        )
+        result = _run_stt(paths.mixed_final, args)
     except Exception as exc:  # noqa: BLE001 - never lose audio to a transcription error
         log.error("Transcription failed (%s); keeping the audio file.", exc)
         return False
@@ -548,6 +633,11 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     _print_banner()
+
+    if args.files:
+        failed = _transcribe_files(args)
+        print(f"\n  Done{f' ({failed} failed)' if failed else ''}!\n")
+        sys.exit(1 if failed else 0)
 
     # Interactive device selection (Enter accepts the auto-detected default).
     mic_index = args.mic
