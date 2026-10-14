@@ -55,7 +55,7 @@ DIARIZE_CACHE_DIR: Path = Path.home() / ".cache" / "meeting_recorder" / "speaker
 # (over-merges). Calibrated against a hand-counted recording; validate further
 # before trusting it across very different meeting sizes/styles.
 DIARIZE_CLUSTER_THRESHOLD: float = 1.3
-DIARIZE_MIN_SEGMENT_S: float = 0.3  # drop VAD slivers too short to embed meaningfully
+DIARIZE_MIN_SEGMENT_S: float = 1.0  # drop VAD slivers too short to embed meaningfully
 # Mic-channel segments are a known fact (it's always this one person), so they
 # are labeled directly -- no embedding/clustering needed for that channel.
 DIARIZE_LOCAL_SPEAKER_LABEL: str = "Local"

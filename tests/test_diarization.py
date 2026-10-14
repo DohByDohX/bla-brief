@@ -320,7 +320,7 @@ def test_transcribe_with_speakers_channel_aware(tmp_path: Path, monkeypatch):
     def fake_run_vad(audio: np.ndarray) -> list[_SpeechSegment]:
         if audio.size == 32000:  # mic track
             return [_SpeechSegment(start=0.0, end=1.0)]
-        return [_SpeechSegment(start=0.0, end=0.5)]  # sys track, pre-alignment
+        return [_SpeechSegment(start=0.0, end=1.0)]  # sys track, pre-alignment
 
     monkeypatch.setattr(diarization, "_run_vad", fake_run_vad)
     monkeypatch.setattr(diarization, "_load_embedder", lambda: object())
@@ -336,7 +336,7 @@ def test_transcribe_with_speakers_channel_aware(tmp_path: Path, monkeypatch):
 
     result = transcribe_with_speakers(mixed, device="cpu", mic_path=mic, sys_path=sys)
 
-    # The system segment (0.0-0.5 raw) is shifted +1.0s to 1.0-1.5 in the
+    # The system segment (0.0-1.0 raw) is shifted +1.0s to 1.0-2.0 in the
     # mixed timeline, so "world." (at 1.2-1.5) lands on Speaker 0, not Local.
     assert result.text == "Local: Hello\nSpeaker 0: world."
 
