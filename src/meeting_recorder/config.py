@@ -51,7 +51,7 @@ POST_TRANSCRIBE_SCRIPT: Path = (
 DIARIZE_MODEL: str = "speechbrain/spkrec-ecapa-voxceleb"
 DIARIZE_CACHE_DIR: Path = Path.home() / ".cache" / "meeting_recorder" / "speaker_embedder"
 # Diarization v2 (4.10.0). Tuned on 7 hand-labelled meetings and checked on 14
-# unlabelled ones; evidence and rationale in spike/port_plan.md (spike branch).
+# unlabelled ones; results in CHANGELOG.md [4.10.0].
 #
 # VAD: a pause this long splits speech into segments. 300 ms (was 500) splits
 # more turns that two speakers share without a long gap.

@@ -104,16 +104,27 @@ confirm real day-to-day usage holds up before GA on 2026-10-21.
 - Any crash/traceback in the console output, especially around mixdown,
   model loading, or the catch-up automation firing.
 
-**Where to log issues:** append a new dated entry to
-[diarization-validation.md](diarization-validation.md) for quality issues
-(the existing format: meeting context, findings, recommended fix). For
-crashes/bugs, note them there too or as a regular commit fixing the issue,
-same as the fixes found during Phase 2 validation (mixdown directory
-creation, banner crash).
+**Where to log issues:** add a dated entry to the
+[canary log](#canary-log) at the end of this doc for quality issues and
+crashes alike. Fixes land as regular commits, same as the fixes found during
+Phase 2 validation (mixdown directory creation, banner crash).
 
 **Go/no-go bar for GA (2026-10-21):** no crashes on normal use, diarization
-quality holding at the 8.5-9/10 level already measured post-9d0bf75 (see
-diarization-validation.md), and no new latency or offline-network
-regressions. A known limitation (acoustic bleed when a remote participant
+quality holding up on the spot-checks above (speaker counts matching
+attendees, no phantom or split speakers), and no new latency or
+offline-network regressions. A known limitation (acoustic bleed when a remote participant
 uses speakers instead of a headset) is accepted as-is, not a blocker.
 
+## Canary log
+
+One entry per issue, newest first. Format:
+
+```
+### YYYY-MM-DD - short title
+- Meeting: length, number of attendees, setup (headset/speakers, call type)
+- Finding: what went wrong (wrong speaker count, phantom/split speaker,
+  crash, latency); quote a line or two if it helps
+- Fix: commit, or "open"
+```
+
+_No entries yet._

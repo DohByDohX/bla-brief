@@ -7,13 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `docs/diarization-validation.md` and the `spike/` diarization scripts.
+  Canary issues are now logged in the canary log section of
+  `docs/runbook.md`.
+
 ## [4.10.0] - 2026-10-15
 
 ### Changed
 - Diarization v2. Measured on 7 hand-labelled meetings, word-level speaker
   error (WDER) fell from 10.2% to 0.8% on average, and the speaker-count
   error from 10 to 4. A label-free check on 14 more meetings gave plausible
-  speaker counts for every one (see `docs/diarization-validation.md`).
+  speaker counts for every one.
   - VAD splits on 300 ms pauses (was 500 ms), separating more turns that two
     speakers share without a long gap.
   - Two-stage clustering: only segments of at least 2 s build the speaker
@@ -47,8 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Speaker None`. A word whose midpoint misses every segment now takes the
   label of the segment it overlaps most, else the nearest segment within
   0.5s; words farther away stay unlabeled (often Whisper hallucinations in
-  silence). Removed ~96% of `Speaker None` lines across the validation set
-  (see `docs/diarization-validation.md`).
+  silence). Removed ~96% of `Speaker None` lines across the validation set.
 - Keepalive settle delay raised from 0.2s to 1s before opening input streams,
   reducing a race where a Bluetooth mic's profile switch briefly invalidated
   the loopback device.
