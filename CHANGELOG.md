@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- Channel-aware diarization (mic track labeled directly as `Local:`, only
+  the system/loopback track clustered). Diarization now always clusters the
+  single mixed-file audio stream, same as the system-track path before.
+  Simplification: the added complexity (per-channel VAD, alignment-offset
+  shifting, mic/sys path plumbing through the CLI) wasn't earning its keep
+  relative to single-track clustering.
+
 ## [4.9.0] - 2026-10-07
 
 ### Fixed
