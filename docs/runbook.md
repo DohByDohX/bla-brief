@@ -1,6 +1,6 @@
 # Deployment Runbook: Local Transcription + Diarization
 
-Operational notes for rolling out STT + diarization (v4.9.0+) to a new
+Operational notes for rolling out STT + diarization (v4.9.0+; diarization v2 since v4.10.0) to a new
 machine or troubleshooting an existing one. See [README.md](../README.md) for
 user-facing usage; this doc is for setup/ops issues.
 
@@ -29,8 +29,14 @@ meeting, same audio on both backends:
 | Whisper transcribe | ~10.3s | ~37.1s |
 | **Total** | **~20s** | **~45s** |
 
-Diarization cost is roughly fixed regardless of device (it always runs on
-CPU by design). Transcription scales with recording length, so the CPU/GPU
+**v4.10.0 (diarization v2):** diarization costs about 2.4x the v4.9.0 figure.
+Measured on a 38-min meeting (CPU), it takes about 10.4 s per audio-minute
+vs 4.3 s before; most of the extra is re-segmentation windows. So expect
+roughly 12 s instead of about 5 s for the 3-min case above, and about
+10 min for a one-hour meeting. Transcription times are unchanged.
+
+Diarization always runs on CPU by design, so its cost doesn't depend on the
+device. Transcription scales with recording length, so the CPU/GPU
 gap widens on longer meetings. CPU-only machines are still well within
 acceptable wait times for a typical meeting.
 
@@ -87,12 +93,14 @@ confirm real day-to-day usage holds up before GA on 2026-10-21.
 **What to watch, per recording:**
 - Did a transcript get written at all (check for the `.md` file; a silent
   failure logs a warning but doesn't crash)?
-- Rough diarization quality: `Local:` lines correctly attributed, remote
-  `Speaker N:` lines not fragmented into excessive `Speaker None` or
-  duplicated echoes. Spot-check, don't need to grade every meeting.
-- Wall-clock wait after stopping a recording — should track the latency
-  table above (~20s on GPU / ~45s on CPU per 3 min of audio); flag anything
-  wildly outside that range.
+- Rough diarization quality (v4.10.0+): the number of `Speaker N` labels
+  roughly matches the attendees (a 1:1 shows 2; nobody who spoke a lot is
+  missing). Watch for phantom speakers holding only a line or two, and for
+  one person split across two labels. `Speaker None` should stay rare.
+  Spot-check, don't need to grade every meeting.
+- Wall-clock wait after stopping a recording: should track the latency
+  notes above (v4.10.0 adds about 10 s of diarization per audio-minute on
+  CPU); flag anything wildly outside that range.
 - Any crash/traceback in the console output, especially around mixdown,
   model loading, or the catch-up automation firing.
 
