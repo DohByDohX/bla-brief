@@ -6,11 +6,45 @@ issues and recommended fixes based on manual review of a recorded meeting's
 transcript. Content/topic of meetings is not relevant here — only
 transcription and speaker-attribution quality.
 
-> **Status (v4.9.0):** Earlier entries recommend raising `DIARIZE_MIN_SEGMENT_S`
-> and loosening the near-duplicate matcher. Both are **superseded** — see the
-> 2026-10-06 (1433) *Correction* section and the *Commit 9d0bf75* section at
-> the end. The `Speaker None` root cause was word-to-segment labelling, not
-> segment length or fuzzy matching.
+> **Status (v4.10.0):** Channel-aware diarization was removed (single-track only),
+> and the clustering pipeline was replaced by *diarization v2* (section below).
+> Entries dated before v4.10.0 describe the old pipeline. The v4.9.0 note still
+> holds: the `Speaker None` root cause was word-to-segment labelling (see the
+> 2026-10-06 (1433) *Correction* and *Commit 9d0bf75* sections).
+
+---
+
+## v4.10.0 — Diarization v2 (scored evaluation)
+
+Unlike the manual reviews below, v2 was chosen by **scored** experiments. It used
+the spike scorer on branch `spike/adaptive-clustering` (`spike/score_diarization.py`,
+logs `spike/settings_loop.md`, `spike/reseg_loop.md`, `spike/port_plan.md`).
+
+**Metric:** word-level diarization error rate (WDER) against hand-labelled
+transcripts of 7 meetings (two 1:1s and five multi-speaker calls, 5-38 min). Speaker
+mapping is one-to-one (Hungarian). DER is not used: on text-aligned references
+it is dominated by unlabelled-speech false alarms.
+
+| | mean WDER | speaker-count error (sum over 7) |
+|---|---|---|
+| v4.9.0 pipeline (min-seg 1.0) | 10.16% | 10 |
+| v2 | 0.84% | 4 |
+
+**Changes:**
+- VAD min silence 300 ms.
+- Two-stage AHC: only segments of at least 2 s build clusters.
+- Per-meeting threshold by cosine silhouette over 1.00-1.50.
+- Re-segmentation of segments of at least 3 s: 1.5 s windows every 0.75 s, split on a run of at least 1 s with a margin of at least 0.05.
+
+**How it was checked:**
+- The pick is stable when any one meeting is held out.
+- A label-free check on 14 unlabelled meetings gave speaker counts matching the attendees in every meeting, with no collapsed or phantom-heavy outputs.
+- The production code reproduces the spike's segments exactly (parity run on all 7 meetings).
+
+**Caveats:**
+- All tuning used the same 7 meetings.
+- Three reference transcripts had labelling errors (a new turn typed without a speaker prefix), which were fixed during the work. The scorer now warns about unprefixed lines.
+- Runtime is about 10 s CPU per audio-minute (was about 4).
 
 ---
 

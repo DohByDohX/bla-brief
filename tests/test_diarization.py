@@ -76,9 +76,7 @@ def _patch_pipeline(monkeypatch, segments: list[_SpeechSegment], labels: list[in
     _fake_decode_audio(monkeypatch, lambda *a, **k: np.zeros(1))
     monkeypatch.setattr(diarization, "_run_vad", lambda audio: segments)
     monkeypatch.setattr(diarization, "_load_embedder", lambda: object())
-    monkeypatch.setattr(
-        diarization, "_embed_segments", lambda *a, **k: np.zeros((len(segments), 4))
-    )
+    monkeypatch.setattr(diarization, "_embed_segments", lambda *a, **k: np.ones((len(segments), 4)))
     monkeypatch.setattr(diarization, "_cluster", lambda embeddings: np.array(labels))
 
 
@@ -323,10 +321,129 @@ def test_diarize_single_track_drops_segments_shorter_than_min_segment(monkeypatc
     long = _SpeechSegment(start=1.0, end=1.0 + DIARIZE_MIN_SEGMENT_S)
     monkeypatch.setattr(diarization, "_run_vad", lambda audio: [short, long])
     monkeypatch.setattr(diarization, "_load_embedder", lambda: object())
-    monkeypatch.setattr(diarization, "_embed_segments", lambda *a, **k: np.zeros((1, 4)))
+    monkeypatch.setattr(diarization, "_embed_segments", lambda *a, **k: np.ones((1, 4)))
     monkeypatch.setattr(diarization, "_cluster", lambda embeddings: np.array([0]))
 
     segments = _diarize_single_track(np.zeros(1))
 
     assert segments == [long]
     assert segments[0].label == "Speaker 0"
+
+
+# -- v2: per-meeting threshold, two-stage clustering, re-segmentation ---------
+
+_A = np.array([1.0, 0.0, 0.0, 0.0])
+_B = np.array([0.0, 1.0, 0.0, 0.0])
+
+
+def _near(v: np.ndarray, n: int, seed: int) -> np.ndarray:
+    """n embeddings scattered tightly around direction v."""
+    rng = np.random.default_rng(seed)
+    return v + rng.normal(scale=0.05, size=(n, len(v)))
+
+
+def test_cluster_separates_two_speakers_with_swept_threshold():
+    labels = diarization._cluster(np.vstack([_near(_A, 4, 0), _near(_B, 4, 1)]))
+
+    assert len(set(labels[:4])) == 1
+    assert len(set(labels[4:])) == 1
+    assert labels[0] != labels[4]
+
+
+def test_cluster_falls_back_when_no_threshold_can_be_scored():
+    # Two segments: no clustering has 2..n-1 clusters, so the fixed fallback decides.
+    assert len(diarization._cluster(np.vstack([_A, _A + 0.01]))) == 2
+    assert list(diarization._cluster(_A[None, :])) == [0]
+
+
+def test_two_stage_short_segments_join_nearest_long_cluster():
+    long_a, long_b = _near(_A, 3, 2), _near(_B, 3, 3)
+    short_near_b = _B + np.array([0.0, 0.0, 0.3, 0.0])  # noisy, but closest to B
+    embeddings = np.vstack([long_a, long_b, short_near_b])
+    durs = np.array([5.0] * 6 + [1.2])
+
+    labels = diarization._two_stage_labels(embeddings, durs)
+
+    assert len(set(labels)) == 2  # the short segment can't start a third cluster
+    assert labels[6] == labels[3]
+
+
+def test_two_stage_clusters_everything_when_too_few_long_segments():
+    embeddings = np.vstack([_near(_A, 3, 4), _near(_B, 3, 5)])
+    durs = np.array([5.0] + [1.2] * 5)
+
+    labels = diarization._two_stage_labels(embeddings, durs)
+
+    assert len(labels) == 6
+    assert labels[1] != labels[3]
+
+
+def test_window_spans_cover_segment_and_end_flush():
+    spans = diarization._window_spans(0.0, 4.0)
+
+    assert spans[0][0] == 0.0
+    assert spans[-1][1] == pytest.approx(4.0)
+    assert all(b - a == pytest.approx(diarization.DIARIZE_RESEG_WIN_S) for a, b in spans)
+    assert diarization._window_spans(0.0, 1.0) == [(0.0, 1.0)]
+
+
+def test_split_by_votes_splits_long_run_and_tiles_segment():
+    seg = _SpeechSegment(0.0, 6.0, "Speaker 0")
+    spans = diarization._window_spans(seg.start, seg.end)
+    votes = np.array([0 if (a + b) / 2 < 3.0 else 1 for a, b in spans])
+
+    pieces = diarization._split_by_votes(seg, spans, votes, own=0, ids=[0, 1])
+
+    assert [p.label for p in pieces] == ["Speaker 0", "Speaker 1"]
+    assert pieces[0].start == 0.0 and pieces[-1].end == 6.0
+    assert pieces[0].end == pieces[1].start
+
+
+def test_split_by_votes_ignores_run_shorter_than_minimum():
+    seg = _SpeechSegment(0.0, 6.0, "Speaker 0")
+    spans = diarization._window_spans(seg.start, seg.end)
+    votes = np.zeros(len(spans), dtype=int)
+    votes[3] = 1  # a single window: shorter than DIARIZE_RESEG_RUN_S
+
+    assert diarization._split_by_votes(seg, spans, votes, own=0, ids=[0, 1]) == [seg]
+
+
+class _ToneEmbedder:
+    """Fake ECAPA: windows of audio near 0 embed as A, near 1 as B."""
+
+    def encode_batch(self, batch):  # noqa: ANN001, ANN201
+        import torch
+
+        means = batch.mean(dim=1).numpy()
+        vecs = np.stack([_B if m > 0.5 else _A for m in means])
+        return torch.from_numpy(vecs).float().unsqueeze(1)
+
+
+def test_resegment_splits_segment_holding_two_speakers():
+    pytest.importorskip("torch")
+    sr = diarization.SAMPLE_RATE
+    # 0-6 s: speaker A for 3 s then B for 3 s inside ONE segment; 8-11 s: speaker B.
+    audio = np.zeros(11 * sr, dtype=np.float32)
+    audio[3 * sr : 6 * sr] = 1.0
+    audio[8 * sr :] = 1.0
+    segments = [_SpeechSegment(0.0, 6.0, "Speaker 0"), _SpeechSegment(8.0, 11.0, "Speaker 1")]
+    labels = np.array([0, 1])
+    normed = np.vstack([_A, _B])
+    durs = np.array([6.0, 3.0])
+
+    out = diarization._resegment(_ToneEmbedder(), audio, segments, labels, normed, durs)
+
+    assert [s.label for s in out] == ["Speaker 0", "Speaker 1", "Speaker 1"]
+    assert out[0].end == pytest.approx(out[1].start)
+    assert 2.5 <= out[0].end <= 3.5
+    assert out[2] is segments[1]
+
+
+def test_resegment_leaves_short_segments_alone():
+    segments = [_SpeechSegment(0.0, 2.0, "Speaker 0"), _SpeechSegment(3.0, 5.0, "Speaker 1")]
+
+    out = diarization._resegment(
+        object(), np.zeros(1), segments, np.array([0, 1]), np.vstack([_A, _B]), np.array([2.0, 2.0])
+    )
+
+    assert out == segments

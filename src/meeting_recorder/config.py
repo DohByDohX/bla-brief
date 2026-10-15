@@ -50,9 +50,29 @@ POST_TRANSCRIBE_SCRIPT: Path = (
 # resolves the same way regardless of the recorder's working directory.
 DIARIZE_MODEL: str = "speechbrain/spkrec-ecapa-voxceleb"
 DIARIZE_CACHE_DIR: Path = Path.home() / ".cache" / "meeting_recorder" / "speaker_embedder"
-# Agglomerative clustering distance threshold (euclidean, on L2-normalized
-# embeddings). Lower = more speakers (over-splits); higher = fewer speakers
-# (over-merges). Calibrated against a hand-counted recording; validate further
-# before trusting it across very different meeting sizes/styles.
-DIARIZE_CLUSTER_THRESHOLD: float = 1.3
+# Diarization v2 (4.10.0). Tuned on 7 hand-labelled meetings and checked on 14
+# unlabelled ones; evidence and rationale in spike/port_plan.md (spike branch).
+#
+# VAD: a pause this long splits speech into segments. 300 ms (was 500) splits
+# more turns that two speakers share without a long gap.
+DIARIZE_VAD_MIN_SILENCE_MS: int = 300
 DIARIZE_MIN_SEGMENT_S: float = 1.0  # drop VAD slivers too short to embed meaningfully
+# Agglomerative clustering distance threshold (euclidean, on L2-normalized
+# embeddings). Each meeting picks the threshold in DIARIZE_THRESHOLD_SWEEP
+# (min, max, step) whose clustering has the best cosine silhouette; this fixed
+# value is only the fallback when no candidate gives 2..n-1 clusters.
+DIARIZE_CLUSTER_THRESHOLD: float = 1.2
+DIARIZE_THRESHOLD_SWEEP: tuple[float, float, float] = (1.00, 1.50, 0.05)
+# Two-stage clustering: only segments at least this long build the clusters;
+# shorter ones join the nearest cluster afterwards and can't start a new one
+# (their embeddings are noisy and produced phantom speakers).
+DIARIZE_TWO_STAGE_MIN_S: float = 2.0
+# Re-segmentation: segments at least DIARIZE_RESEG_MIN_S long are re-checked in
+# windows of DIARIZE_RESEG_WIN_S every DIARIZE_RESEG_HOP_S. A segment is split
+# where another existing cluster wins for at least DIARIZE_RESEG_RUN_S by a
+# cosine margin of at least DIARIZE_RESEG_MARGIN (two speakers in one segment).
+DIARIZE_RESEG_MIN_S: float = 3.0
+DIARIZE_RESEG_WIN_S: float = 1.5
+DIARIZE_RESEG_HOP_S: float = 0.75
+DIARIZE_RESEG_RUN_S: float = 1.0
+DIARIZE_RESEG_MARGIN: float = 0.05
