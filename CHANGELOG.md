@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Recordings now always keep only the mixed file. The post-recording
+  `keep [m]ixed [v]oice [s]ystem` prompt is gone, and mixed-only is the default
+  for interactive and non-interactive runs alike. The raw mic/system tracks are
+  pruned after mixdown (the empty-track fallback still preserves the one usable
+  track when a mix isn't possible).
+
 ## [4.4.0] - 2026-07-18
 
 ### Added
