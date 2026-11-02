@@ -56,15 +56,19 @@ Single package `src/meeting_recorder/`, one responsibility per module:
    states that cannot occur internally.
 5. **Types, lint, format, docstrings.** Full type hints on new code; `ruff` + `mypy` clean;
    docstrings explain *why*, not *what*.
-6. **Automated tests.** Add fast, hardware-free unit tests for new logic. New hardware-dependent
-   behavior goes in `tests/integration/` behind the `integration` marker. Do not merge a feature
-   whose logic has no test.
+6. **Automated tests — before commit/push/PR, only when needed.** If the change adds or
+   changes runtime behavior (new feature, flag, logic path, or bugfix), write a fast
+   hardware-free unit test in the matching `tests/test_*.py` *in the same change*, run it,
+   then commit/push/PR. Hardware-dependent cases go in `tests/integration/` behind the
+   `integration` marker. Skip tests for docs, comments, changelog, formatting, and
+   version-bump-only edits. Do not invent tests for unchanged code. Do not push or merge
+   untested new logic.
 7. **Scope discipline.** Only touch what the task needs. No unrequested refactors, dependencies,
    abstractions, or reformatting of untouched code.
-8. **Version control.** Commit logical units with clear messages once `check.bat` passes; don't
-   leave the tree broken or the work uncommitted. Bump the version ([pyproject.toml](pyproject.toml)
-   + [__init__.py](src/meeting_recorder/__init__.py)) for user-facing changes (SemVer: MINOR for
-   features, PATCH for fixes).
+8. **Version control.** Commit logical units with clear messages once `check.bat` passes and
+   any tests required by item 6 exist; don't leave the tree broken or the work uncommitted.
+   Bump the version ([pyproject.toml](pyproject.toml) + [__init__.py](src/meeting_recorder/__init__.py))
+   for user-facing changes (SemVer: MINOR for features, PATCH for fixes).
 
 ## Project-specific conventions & gotchas
 

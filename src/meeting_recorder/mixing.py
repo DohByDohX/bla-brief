@@ -24,6 +24,22 @@ def _read_mono_float(wav: wave.Wave_read, nframes: int) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
+def resolve_alignment_offset_s(mic_dur_s: float, sys_dur_s: float, out_rate: int) -> float:
+    """Infer the seconds the system track started after the mic (``"auto"`` mode).
+
+    Assumes the two streams stopped together (the recorder guarantees this), so
+    the shorter track is the one that started later. Positive = system late.
+    Rounds to whole output-rate frames, matching how the mixdown itself aligns
+    the tracks, so this stays exactly consistent with the mixed file's timeline
+    (used by :func:`create_mixed_file` and, separately, by diarization to shift
+    raw-track VAD timestamps onto the mixed file's timeline).
+    """
+    mic_out_len = round(mic_dur_s * out_rate)
+    sys_out_len = round(sys_dur_s * out_rate)
+    lead = mic_out_len - sys_out_len
+    return lead / out_rate
+
+
 def _mic_resampled_chunk(
     mic_wav: wave.Wave_read,
     mic_total: int,
@@ -122,7 +138,7 @@ def create_mixed_file(
 
         # Resolve alignment offset (seconds system started after mic).
         if sync_offset == "auto":
-            offset_sec = (mic_out_len - sys_out_len) / out_rate
+            offset_sec = resolve_alignment_offset_s(mic_dur, sys_dur, out_rate)
         else:
             offset_sec = float(sync_offset)
 
