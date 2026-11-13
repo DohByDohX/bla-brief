@@ -90,3 +90,13 @@ Single package `src/meeting_recorder/`, one responsibility per module:
   A `*.wav` watcher must only ever see one finished file.
 - **Track sync:** both streams start together and the mixer end-anchors them via the measured/auto
   offset. Changes to capture or mixing must preserve mic/system alignment.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one root `GLOSSARY.md` plus `docs/adr/` (both created lazily). See `docs/agents/domain.md`.
