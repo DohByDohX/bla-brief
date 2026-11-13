@@ -7,6 +7,8 @@ diarization dependencies (speechbrain, torch, scikit-learn) to be installed.
 
 from __future__ import annotations
 
+import sys
+import types
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,9 +58,15 @@ class _FakeWhisperModel:
 def _patch_pipeline(monkeypatch, segments: list[_SpeechSegment], labels: list[int]) -> None:
     monkeypatch.setattr(diarization, "_register_cuda_dll_dirs", lambda: None)
     monkeypatch.setattr(diarization, "_enable_offline", lambda: None)
-    # decode_audio is imported lazily inside the function, so patch it where
-    # it actually lives rather than on the diarization module.
-    monkeypatch.setattr("faster_whisper.audio.decode_audio", lambda *a, **k: np.zeros(1))
+    # decode_audio is imported lazily (``from faster_whisper.audio import ...``)
+    # inside the function. Inject a fake module into sys.modules rather than
+    # patching the real one, so these tests run even when the optional
+    # faster-whisper dependency is not installed (as in CI).
+    fake_audio = types.ModuleType("faster_whisper.audio")
+    fake_audio.decode_audio = lambda *a, **k: np.zeros(1)  # type: ignore[attr-defined]
+    if "faster_whisper" not in sys.modules:
+        monkeypatch.setitem(sys.modules, "faster_whisper", types.ModuleType("faster_whisper"))
+    monkeypatch.setitem(sys.modules, "faster_whisper.audio", fake_audio)
     monkeypatch.setattr(diarization, "_run_vad", lambda audio: segments)
     monkeypatch.setattr(diarization, "_load_embedder", lambda: object())
     monkeypatch.setattr(diarization, "_embed_segments", lambda *a, **k: np.ones((len(segments), 4)))
