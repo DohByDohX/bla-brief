@@ -6,14 +6,31 @@ import wave
 from pathlib import Path
 
 import numpy as np
+import pytest
 from support import read_wav, write_sine_wav
 
-from meeting_recorder.mixing import create_mixed_file
+from meeting_recorder.mixing import create_mixed_file, resolve_alignment_offset_s
 
 
 def _duration_s(path: Path) -> float:
     with wave.open(str(path), "rb") as wf:
         return wf.getnframes() / wf.getframerate()
+
+
+def test_resolve_alignment_offset_system_late() -> None:
+    # Mic ran 2s longer -> system started ~2s after the mic (positive offset).
+    offset = resolve_alignment_offset_s(mic_dur_s=5.0, sys_dur_s=3.0, out_rate=48000)
+    assert offset == pytest.approx(2.0)
+
+
+def test_resolve_alignment_offset_mic_late() -> None:
+    # System ran longer -> mic started later (negative offset).
+    offset = resolve_alignment_offset_s(mic_dur_s=3.0, sys_dur_s=5.0, out_rate=48000)
+    assert offset == pytest.approx(-2.0)
+
+
+def test_resolve_alignment_offset_equal_durations_is_zero() -> None:
+    assert resolve_alignment_offset_s(mic_dur_s=4.0, sys_dur_s=4.0, out_rate=16000) == 0.0
 
 
 def test_equal_length_same_rate_mix(tmp_audio_dir: Path) -> None:

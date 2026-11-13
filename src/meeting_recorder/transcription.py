@@ -148,7 +148,7 @@ def _load_whisper_model(model_size: str, device: str, compute_type: str) -> Any:
 def transcribe_file(
     wav_path: Path,
     *,
-    model: str = "base.en",
+    model: str = "small.en",
     device: str = "auto",
     language: str = "en",
 ) -> TranscriptionResult:
@@ -193,11 +193,11 @@ def transcribe_file(
     raise RuntimeError(f"No transcription backend could be loaded (last error: {last_error})")
 
 
-def download_model(model: str = "base.en") -> None:
-    """Fetch ``model`` into the local cache -- the only online operation.
+def download_model(model: str = "small.en") -> None:
+    """Fetch ``model`` and the diarization embedder into the local cache.
 
-    This is the sanctioned one-time step to populate the HuggingFace cache so
-    that all later recordings run offline. It validates TLS against the OS trust
+    This is the sanctioned one-time step to populate the caches so that all
+    later recordings run offline. It validates TLS against the OS trust
     store (via truststore) instead of disabling any certificate check, and does
     not force offline mode. Loads on CPU since it only needs to download.
     """
@@ -206,6 +206,12 @@ def download_model(model: str = "base.en") -> None:
     log.info("Downloading transcription model '%s' into the local cache...", model)
     _load_whisper_model(model, "cpu", "int8")
     log.info("Model '%s' is cached; recordings can now transcribe offline.", model)
+
+    from meeting_recorder import diarization
+
+    log.info("Downloading diarization model into the local cache...")
+    diarization.download_embedder()
+    log.info("Diarization model is cached; recordings can now diarize offline.")
 
 
 def write_transcript(text: str, dest_md: Path) -> Path:
