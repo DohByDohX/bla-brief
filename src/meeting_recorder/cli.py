@@ -389,6 +389,8 @@ def _produce_outputs(
             mixed_made = True
         else:
             _safe_unlink(paths.mixed_tmp)  # no stray .part left behind
+            log.error("Mixdown failed. Keeping the raw mic and system tracks instead.")
+            keep_mic = keep_sys = True  # no mixed file exists; pruning would lose the recording
     elif want_mixed and mic_ok:
         log.warning("System audio track is empty; cannot mix. Keeping the mic track instead.")
         keep_mic = True  # fall back to the one usable track so nothing is lost

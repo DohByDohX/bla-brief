@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.10.1] - 2026-11-13
+
+### Fixed
+- A failed mixdown no longer deletes the raw mic/system tracks when
+  transcription is off. Both tracks are now kept so the recording is never lost.
+
 ### Removed
 - `docs/diarization-validation.md` and the `spike/` diarization scripts.
   Canary issues are now logged in the canary log section of

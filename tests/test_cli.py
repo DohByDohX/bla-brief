@@ -146,6 +146,20 @@ def test_produce_outputs_keeps_usable_track_when_mix_impossible(tmp_path: Path):
     assert paths.mic_path.exists()  # preserved fallback
 
 
+def test_mix_failure_keeps_both_raw_tracks(tmp_path: Path, monkeypatch):
+    # A failed mixdown leaves no mixed file; pruning the raw tracks afterwards
+    # would lose the recording entirely. Both tracks must survive.
+    paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
+    monkeypatch.setattr(cli, "create_mixed_file", lambda *a, **k: False)
+
+    keep_mic, keep_sys = _produce_outputs(paths, _args(), keep={"mixed"})
+    _prune_unkept_tracks(paths, keep_mic, keep_sys, keep_audio=False)
+
+    assert not paths.mixed_final.exists()
+    assert paths.mic_path.exists()
+    assert paths.sys_path.exists()
+
+
 def test_produce_outputs_discard_tracks_forces_mixed_only(tmp_path: Path):
     paths = _paths_with_tracks(tmp_path, mic_s=0.5, sys_s=0.5)
     keep_mic, keep_sys = _produce_outputs(paths, _args(discard_tracks=True), keep=set(ALL_OUTPUTS))
