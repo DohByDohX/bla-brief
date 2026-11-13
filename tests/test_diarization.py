@@ -7,6 +7,9 @@ diarization dependencies (speechbrain, torch, scikit-learn) to be installed.
 
 from __future__ import annotations
 
+import sys
+import types
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,12 +57,24 @@ class _FakeWhisperModel:
         return iter(self._segments), _FakeInfo()
 
 
+def _fake_decode_audio(monkeypatch, decode: Callable[..., np.ndarray]) -> None:
+    """Stand in for ``faster_whisper.audio.decode_audio``.
+
+    diarization imports it lazily (``from faster_whisper.audio import ...``), so
+    injecting a fake module into sys.modules works even when the optional
+    faster-whisper dependency is not installed (as in CI).
+    """
+    fake_audio = types.ModuleType("faster_whisper.audio")
+    fake_audio.decode_audio = decode  # type: ignore[attr-defined]
+    if "faster_whisper" not in sys.modules:
+        monkeypatch.setitem(sys.modules, "faster_whisper", types.ModuleType("faster_whisper"))
+    monkeypatch.setitem(sys.modules, "faster_whisper.audio", fake_audio)
+
+
 def _patch_pipeline(monkeypatch, segments: list[_SpeechSegment], labels: list[int]) -> None:
     monkeypatch.setattr(diarization, "_register_cuda_dll_dirs", lambda: None)
     monkeypatch.setattr(diarization, "_enable_offline", lambda: None)
-    # decode_audio is imported lazily inside the function, so patch it where
-    # it actually lives rather than on the diarization module.
-    monkeypatch.setattr("faster_whisper.audio.decode_audio", lambda *a, **k: np.zeros(1))
+    _fake_decode_audio(monkeypatch, lambda *a, **k: np.zeros(1))
     monkeypatch.setattr(diarization, "_run_vad", lambda audio: segments)
     monkeypatch.setattr(diarization, "_load_embedder", lambda: object())
     monkeypatch.setattr(
@@ -315,7 +330,7 @@ def test_transcribe_with_speakers_channel_aware(tmp_path: Path, monkeypatch):
 
     # Mic ran 1s longer than system -> system started ~1s late (gets padded).
     audio_by_path = {str(mic): np.zeros(32000), str(sys): np.zeros(16000)}
-    monkeypatch.setattr("faster_whisper.audio.decode_audio", lambda path, **k: audio_by_path[path])
+    _fake_decode_audio(monkeypatch, lambda path, **k: audio_by_path[path])
 
     def fake_run_vad(audio: np.ndarray) -> list[_SpeechSegment]:
         if audio.size == 32000:  # mic track
@@ -370,7 +385,7 @@ def test_diarize_channel_aware_keeps_short_mic_segments(tmp_path: Path, monkeypa
         p.write_bytes(b"\0")
 
     audio_by_path = {str(mic): np.zeros(16000), str(sys): np.zeros(16000)}
-    monkeypatch.setattr("faster_whisper.audio.decode_audio", lambda path, **k: audio_by_path[path])
+    _fake_decode_audio(monkeypatch, lambda path, **k: audio_by_path[path])
 
     short_mic_segment = _SpeechSegment(start=0.0, end=DIARIZE_MIN_SEGMENT_S / 2)
 
