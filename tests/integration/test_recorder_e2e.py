@@ -29,7 +29,12 @@ import pytest
 pytestmark = pytest.mark.integration
 
 PYTHON = sys.executable
-RECORDER_CMD = [PYTHON, "-m", "meeting_recorder"]
+# --no-transcribe: these tests validate capture/mixdown only (transcription is
+# covered by test_transcription.py/test_diarization.py). Without this flag,
+# every subprocess would transcribe against the *real* TRANSCRIPT_DIR and fire
+# the *real* catch-up automation, and the extra 5-45s of STT/diarization blows
+# past these tests' communicate() timeouts.
+RECORDER_CMD = [PYTHON, "-m", "meeting_recorder", "--no-transcribe"]
 TEST_DIR = Path(r"C:\Users\pchavan\AppData\Local\Temp\opencode\qa_tests")
 
 
@@ -114,7 +119,7 @@ def test_short_recording():
     out_dir.mkdir(parents=True, exist_ok=True)
     tracks_dir = find_tracks_dir(out_dir)
 
-    proc = run_recorder(["-n", "qa-test1", "-o", str(out_dir)], record_seconds=10)
+    proc = run_recorder(["-n", "qa-test1", "-o", str(out_dir), "--keep-audio"], record_seconds=10)
     assert proc.returncode == 0
 
     mixed = [f for f in out_dir.glob("*qa-test1*.wav") if ".part" not in f.name]
@@ -145,7 +150,7 @@ def test_audio_quality():
     out_dir.mkdir(parents=True, exist_ok=True)
     tracks_dir = find_tracks_dir(out_dir)
 
-    proc = run_recorder(["-n", "qa-test2", "-o", str(out_dir)], record_seconds=8)
+    proc = run_recorder(["-n", "qa-test2", "-o", str(out_dir), "--keep-audio"], record_seconds=8)
     assert proc.returncode == 0
 
     mic_files = list(tracks_dir.glob("*mic-only*"))
@@ -384,7 +389,8 @@ def test_custom_tracks_dir():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     proc = run_recorder(
-        ["-n", "qa-test9", "-o", str(out_dir), "--tracks-dir", str(custom_tracks)], record_seconds=8
+        ["-n", "qa-test9", "-o", str(out_dir), "--tracks-dir", str(custom_tracks), "--keep-audio"],
+        record_seconds=8,
     )
     assert proc.returncode == 0
 
